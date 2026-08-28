@@ -245,11 +245,18 @@ The image is Bun on Alpine, runs as a non-root user, and keeps a read only root
 filesystem. Only `./data` is writable, which is where the SQLite database lives.
 
 ```bash
-cp .env.example .env          # then fill in the token and the SSID
-echo "DOCKER_UID=$(id -u)" >> .env
-echo "DOCKER_GID=$(id -g)" >> .env
+cp .env.example .env                     # then fill in the token and the SSID
+mkdir -p data && sudo chown -R 1000:1000 data   # 1000:1000 is the image's own bun user
 docker compose up -d
 docker compose logs -f
+```
+
+To keep the database owned by your own user instead, point the container at it:
+
+```bash
+sed -i "s/^DOCKER_UID=.*/DOCKER_UID=$(id -u)/; s/^DOCKER_GID=.*/DOCKER_GID=$(id -g)/" .env
+sudo chown -R "$(id -u):$(id -g)" data
+docker compose up -d --force-recreate
 ```
 
 The database is a bind mount, not a Docker volume: `./data` on the host is
@@ -258,8 +265,10 @@ project directory where you can read, copy and back it up normally. Point
 `DATA_DIR` in `.env` somewhere else if you want it in another path.
 
 `DOCKER_UID` / `DOCKER_GID` must match the owner of `./data` on the host,
-otherwise the container cannot write the database. The entrypoint checks this
-before startup and tells you what to fix instead of failing later on a write.
+otherwise the container cannot write the database, and deploying as root is the
+usual way to get this wrong: a freshly cloned `./data` is owned by `root`, while
+the container runs as uid 1000. The entrypoint checks the directory before
+startup and prints the exact `chown` to run instead of failing later on a write.
 The mount is declared with `create_host_path: false`, so a missing `./data`
 stops compose with a clear message rather than creating a root owned directory.
 

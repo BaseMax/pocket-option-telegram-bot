@@ -9,11 +9,19 @@ if [ ! -d "$DATA_DIR" ]; then
 fi
 
 if ! touch "$DATA_DIR/.write-test" 2>/dev/null; then
-  echo "FATAL: $DATA_DIR is not writable by uid $(id -u):$(id -g)." >&2
+  uid=$(id -u)
+  gid=$(id -g)
+  echo "FATAL: $DATA_DIR is not writable by uid $uid:$gid." >&2
   echo "The bot keeps its SQLite database there, so it cannot start." >&2
-  echo "Set DOCKER_UID and DOCKER_GID in .env to the owner of ./data:" >&2
-  echo "  echo \"DOCKER_UID=\$(id -u)\" >> .env && echo \"DOCKER_GID=\$(id -g)\" >> .env" >&2
-  echo "then run: docker compose up -d --force-recreate" >&2
+  echo "" >&2
+  echo "On the host, give the mounted directory to that user:" >&2
+  echo "  sudo chown -R $uid:$gid data" >&2
+  echo "" >&2
+  echo "Or run the container as whoever already owns it, in .env:" >&2
+  echo "  DOCKER_UID=<owner uid>   # see: stat -c '%u:%g' data" >&2
+  echo "  DOCKER_GID=<owner gid>" >&2
+  echo "" >&2
+  echo "Then: docker compose up -d --force-recreate" >&2
   exit 1
 fi
 rm -f "$DATA_DIR/.write-test"

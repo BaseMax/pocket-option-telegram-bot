@@ -13,14 +13,8 @@ services:
       DB_PATH: /app/data/bot.sqlite
       HEARTBEAT_PATH: /app/data/heartbeat
 
-    # The SQLite file is written as this user. Set DOCKER_UID / DOCKER_GID in
-    # .env to the owner of ./data (id -u / id -g) or the bot cannot write.
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
 
-    # The SQLite database lives in the project directory on the host, never in
-    # Docker's own storage. create_host_path is off on purpose: if the directory
-    # is missing, compose says so instead of creating a root owned one that the
-    # bot then cannot write.
     volumes:
       - type: bind
         source: ${DATA_DIR:-./data}
