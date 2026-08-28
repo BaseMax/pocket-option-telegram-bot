@@ -160,6 +160,26 @@ export class Session extends Emitter<SessionEvents> {
   }
 }
 
+/**
+ * Borrows a session for one question and always gives it back, so a query never keeps a
+ * connection alive after it is done with it.
+ */
+export async function borrowSession<T>(
+  sessions: SessionManager,
+  mode: AccountMode,
+  symbol: string | null,
+  label: string,
+  ask: (session: Session) => Promise<T>,
+): Promise<T> {
+  const holder = `${label}:${Date.now()}`;
+  const session = sessions.acquire(mode, symbol, holder);
+  try {
+    return await ask(session);
+  } finally {
+    sessions.release(mode, symbol, holder);
+  }
+}
+
 interface SessionEntry {
   session: Session;
   holders: Set<string>;

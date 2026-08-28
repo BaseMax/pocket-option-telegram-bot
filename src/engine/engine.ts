@@ -1,13 +1,18 @@
 import { createLogger } from '../logger.ts';
-import { SessionManager, MissingCredentialsError, type Session } from './session.ts';
+import { errorMessage } from '../util/errors.ts';
+import { awaitEvent } from '../util/async.ts';
+import { SessionManager, MissingCredentialsError, borrowSession, type Session } from './session.ts';
+import { resolveExpiry } from './expiry.ts';
+import { MarketData, type SymbolCheck } from './market.ts';
 import { isTouched, resolveApproachSide } from './trigger.ts';
-import { candleOpenTime, nowSeconds, nthCandleCloseTime } from '../util/time.ts';
-import { normalizeSymbol, resolveSymbol } from '../pocket/symbols.ts';
+import { candleOpenTime, nowSeconds } from '../util/time.ts';
 import type { AppConfig } from '../config.ts';
 import type { OrderRepository } from '../storage/orders.ts';
 import type { SettingsStore } from '../storage/settings.ts';
 import type { AccountMode, NewOrder, Order } from '../types.ts';
 import type { AssetInfo, ClosedDeal, OpenOrderAck } from '../pocket/protocol.ts';
+
+export type { SymbolCheck } from './market.ts';
 
 export type EngineEvent =
   | { type: 'triggered'; order: Order; price: number }
@@ -20,11 +25,6 @@ export type EngineEvent =
   | { type: 'settlement_pending'; order: Order }
   | { type: 'session'; mode: AccountMode; symbol: string | null; state: 'up' | 'down'; detail?: string }
   | { type: 'auth_failed'; mode: AccountMode; detail: string };
-
-export type SymbolCheck =
-  | { state: 'ok'; symbol: string; asset: AssetInfo; twin: AssetInfo | null; corrected: boolean }
-  | { state: 'unknown'; input: string; suggestions: AssetInfo[] }
-  | { state: 'unverified'; symbol: string; reason: string };
 
 export type EngineEventHandler = (event: EngineEvent) => void;
 
@@ -39,8 +39,8 @@ const HOUSEKEEPING_INTERVAL_MS = 1_000;
 export class TradeEngine {
   private readonly config: AppConfig;
   private readonly orders: OrderRepository;
-  private readonly settings: SettingsStore;
   private readonly sessions: SessionManager;
+  private readonly market: MarketData;
   private readonly logger = createLogger('engine');
   private readonly handlers = new Set<EngineEventHandler>();
   private readonly attachments = new Map<string, Attachment>();
@@ -53,8 +53,8 @@ export class TradeEngine {
   ) {
     this.config = config;
     this.orders = orders;
-    this.settings = settings;
     this.sessions = sessions;
+    this.market = new MarketData(sessions, settings);
   }
   start(): void {
     if (this.timer) return;
@@ -104,118 +104,27 @@ export class TradeEngine {
   hasCredentials(mode: AccountMode): boolean {
     return this.sessions.hasCredentials(mode);
   }
+  /** Read-only market questions, answered by borrowing a session when none is open. */
   cachedBalance(mode: AccountMode): number | null {
-    for (const { session } of this.sessions.list()) {
-      if (session.mode === mode && session.balance !== null) return session.balance;
-    }
-    return null;
-  }
-  async balance(mode: AccountMode, timeoutMs = 20_000): Promise<number | null> {
-    const existing = this.sessions
-      .list()
-      .map((entry) => entry.session)
-      .find((session) => session.mode === mode && session.balance !== null);
-    if (existing) return existing.balance;
-
-    const holder = `balance:${Date.now()}`;
-    const session = this.sessions.acquire(mode, null, holder);
-    try {
-      await session.client.waitUntilReady(timeoutMs);
-      if (session.balance !== null) return session.balance;
-      return await new Promise<number | null>((resolve) => {
-        const timer = setTimeout(() => {
-          off();
-          resolve(session.balance);
-        }, 8_000);
-        const off = session.on('balance', (value) => {
-          clearTimeout(timer);
-          off();
-          resolve(value);
-        });
-        session.client.refreshBalance();
-      });
-    } finally {
-      this.sessions.release(mode, null, holder);
-    }
-  }
-  async assets(mode: AccountMode, timeoutMs = 20_000): Promise<readonly AssetInfo[]> {
-    const live = this.sessions
-      .list()
-      .map((entry) => entry.session)
-      .find((session) => session.mode === mode && session.assets.length > 0);
-    if (live) return live.assets;
-
-    const holder = `assets:${Date.now()}`;
-    const session = this.sessions.acquire(mode, null, holder);
-    try {
-      await session.client.waitUntilReady(timeoutMs);
-      if (session.assets.length > 0) return session.assets;
-      return await new Promise<readonly AssetInfo[]>((resolve) => {
-        const timer = setTimeout(() => {
-          off();
-          resolve(session.assets);
-        }, 8_000);
-        const off = session.on('assets', (list) => {
-          clearTimeout(timer);
-          off();
-          resolve(list);
-        });
-      });
-    } finally {
-      this.sessions.release(mode, null, holder);
-    }
+    return this.market.cachedBalance(mode);
   }
 
-  async checkSymbol(mode: AccountMode, raw: string): Promise<SymbolCheck> {
-    const symbol = normalizeSymbol(raw);
-    try {
-      const assets = await this.assets(mode);
-      if (assets.length === 0) {
-        return { state: 'unverified', symbol, reason: 'the broker sent no asset list' };
-      }
-      const match = resolveSymbol(raw, assets);
-      if (match.status === 'unknown') {
-        return { state: 'unknown', input: match.input, suggestions: match.suggestions };
-      }
-      return {
-        state: 'ok',
-        symbol: match.asset!.symbol,
-        asset: match.asset!,
-        twin: match.twin,
-        corrected: match.status === 'corrected',
-      };
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`could not verify ${symbol} against the broker asset list`, error);
-      return { state: 'unverified', symbol, reason };
-    }
+  balance(mode: AccountMode, timeoutMs?: number): Promise<number | null> {
+    return this.market.balance(mode, timeoutMs);
   }
 
-  async price(mode: AccountMode, symbol: string, timeoutMs = 20_000): Promise<number | null> {
-    const existing = this.sessions.get(mode, symbol);
-    if (existing?.price !== null && existing?.price !== undefined) return existing.price;
-
-    const holder = `price:${Date.now()}`;
-    const session = this.sessions.acquire(mode, symbol, holder);
-    session.ensureTimeframe(this.settings.get('defaultTimeframeSeconds'));
-    try {
-      await session.client.waitUntilReady(timeoutMs);
-      if (session.price !== null) return session.price;
-      return await new Promise<number | null>((resolve) => {
-        const timer = setTimeout(() => {
-          off();
-          resolve(session.price);
-        }, 10_000);
-        const off = session.on('tick', (tick) => {
-          clearTimeout(timer);
-          off();
-          resolve(tick.price);
-        });
-      });
-    } finally {
-      this.sessions.release(mode, symbol, holder);
-    }
+  assets(mode: AccountMode, timeoutMs?: number): Promise<readonly AssetInfo[]> {
+    return this.market.assets(mode, timeoutMs);
   }
+
+  price(mode: AccountMode, symbol: string, timeoutMs?: number): Promise<number | null> {
+    return this.market.price(mode, symbol, timeoutMs);
+  }
+
+  checkSymbol(mode: AccountMode, raw: string): Promise<SymbolCheck> {
+    return this.market.checkSymbol(mode, raw);
+  }
+
   async createOrder(input: NewOrder): Promise<Order> {
     if (!this.sessions.hasCredentials(input.accountMode)) {
       throw new MissingCredentialsError(input.accountMode);
@@ -266,42 +175,33 @@ export class TradeEngine {
     }
     this.logger.info(`credentials for ${mode} reloaded; ${affected.length} order(s) re-attached`);
   }
+  /** Opens a throwaway session to prove a freshly stored SSID actually works. */
   async testCredentials(
     mode: AccountMode,
     timeoutMs = 25_000,
   ): Promise<{ ok: true; balance: number | null } | { ok: false; error: string }> {
-    const holder = `test:${Date.now()}`;
-    let session: Session;
     try {
-      session = this.sessions.acquire(mode, null, holder);
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
+      return await borrowSession(this.sessions, mode, null, 'test', async (session) => {
+        const outcome = session.isReady
+          ? { ok: true as const }
+          : await awaitEvent<{ ok: true } | { ok: false; error: string }>({
+              subscribe: (deliver) => {
+                const offReady = session.on('ready', () => deliver({ ok: true }));
+                const offFail = session.on('authFailed', (error) => deliver({ ok: false, error }));
+                return () => {
+                  offReady();
+                  offFail();
+                };
+              },
+              timeoutMs,
+              onTimeout: () => ({ ok: false, error: 'no response from the broker in time' }),
+            });
 
-    try {
-      const outcome = await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
-        if (session.isReady) {
-          resolve({ ok: true });
-          return;
-        }
-        const finish = (result: { ok: true } | { ok: false; error: string }): void => {
-          clearTimeout(timer);
-          offReady();
-          offFail();
-          resolve(result);
-        };
-        const timer = setTimeout(
-          () => finish({ ok: false, error: 'no response from the broker in time' }),
-          timeoutMs,
-        );
-        const offReady = session.on('ready', () => finish({ ok: true }));
-        const offFail = session.on('authFailed', (reason) => finish({ ok: false, error: reason }));
+        if (!outcome.ok) return outcome;
+        return { ok: true as const, balance: await this.balance(mode, timeoutMs) };
       });
-
-      if (!outcome.ok) return outcome;
-      return { ok: true, balance: await this.balance(mode, timeoutMs) };
-    } finally {
-      this.sessions.release(mode, null, holder);
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   }
 
@@ -312,7 +212,7 @@ export class TradeEngine {
     try {
       session = this.sessions.acquire(order.accountMode, order.symbol, order.id);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       const updated = this.orders.update(order.id, { status: 'failed', note: message });
       if (updated) this.publish({ type: 'failed', order: updated, error: message });
       return;
@@ -320,29 +220,22 @@ export class TradeEngine {
 
     session.ensureTimeframe(order.timeframeSeconds);
 
-    const offTick = session.on('tick', () => this.onTick(order.id, session));
-    const offDeal = session.on('dealClosed', (deal) =>
-      this.onDealClosed(deal, session.client.timeOffset),
-    );
-    const offUp = session.on('ready', () =>
-      this.publish({ type: 'session', mode: session.mode, symbol: session.symbol, state: 'up' }),
-    );
-    const offDown = session.on('disconnected', (reason) =>
-      this.publish({ type: 'session', mode: session.mode, symbol: session.symbol, state: 'down', detail: reason }),
-    );
-    const offAuthFail = session.on('authFailed', (reason) =>
-      this.publish({ type: 'auth_failed', mode: session.mode, detail: reason }),
-    );
+    const { mode, symbol } = session;
+    const unsubscribes = [
+      session.on('tick', () => this.onTick(order.id, session)),
+      session.on('dealClosed', (deal) => this.onDealClosed(deal, session.client.timeOffset)),
+      session.on('ready', () => this.publish({ type: 'session', mode, symbol, state: 'up' })),
+      session.on('disconnected', (detail) =>
+        this.publish({ type: 'session', mode, symbol, state: 'down', detail }),
+      ),
+      session.on('authFailed', (detail) => this.publish({ type: 'auth_failed', mode, detail })),
+    ];
 
     this.attachments.set(order.id, {
       session,
       settlementWarned: false,
       detach: () => {
-        offTick();
-        offDeal();
-        offUp();
-        offDown();
-        offAuthFail();
+        for (const off of unsubscribes) off();
       },
     });
   }
@@ -445,31 +338,6 @@ export class TradeEngine {
     this.publish({ type: 'triggered', order: updated, price });
     void this.place(updated, tickTime);
   }
-  private resolveExpiry(
-    order: Order,
-    entryTime: number,
-  ): { durationSeconds?: number; closeAtServerTime?: number; brokerCloseTime: number } {
-    if (order.expiryMode === 'fixed') {
-      return {
-        durationSeconds: order.durationSeconds,
-        brokerCloseTime: entryTime + order.durationSeconds,
-      };
-    }
-
-    let close = nthCandleCloseTime(entryTime, order.timeframeSeconds, order.candleCount);
-    const target = close;
-    while (close - entryTime < this.config.limits.minDurationSeconds) {
-      close += order.timeframeSeconds;
-    }
-    if (close !== target) {
-      this.logger.info(
-        `order ${order.id}: candle close at ${target} is under the ${this.config.limits.minDurationSeconds}s ` +
-          `broker minimum, rolling the expiry forward to ${close}`,
-      );
-    }
-    return { closeAtServerTime: close, brokerCloseTime: close };
-  }
-
   private async place(order: Order, entryTime: number): Promise<void> {
     const attachment = this.attachments.get(order.id);
     const session = attachment?.session;
@@ -479,7 +347,14 @@ export class TradeEngine {
     }
 
     const offset = session.client.timeOffset;
-    const { brokerCloseTime, ...expiry } = this.resolveExpiry(order, entryTime);
+    const minDuration = this.config.limits.minDurationSeconds;
+    const { brokerCloseTime, rolledForwardCandles, ...expiry } = resolveExpiry(order, entryTime, minDuration);
+    if (rolledForwardCandles > 0) {
+      this.logger.info(
+        `order ${order.id}: the candle close was under the ${minDuration}s broker minimum, ` +
+          `rolling the expiry forward ${rolledForwardCandles} candle(s) to ${brokerCloseTime}`,
+      );
+    }
     const request = {
       asset: order.symbol,
       amount: order.amount,
@@ -492,10 +367,7 @@ export class TradeEngine {
         ack = await session.client.openOrder({ ...request, ...expiry });
       } catch (error) {
         if (expiry.closeAtServerTime === undefined) throw error;
-        const seconds = Math.max(
-          this.config.limits.minDurationSeconds,
-          Math.round(brokerCloseTime - entryTime),
-        );
+        const seconds = Math.max(minDuration, Math.round(brokerCloseTime - entryTime));
         this.logger.warn(`closeAt rejected for ${order.id}, retrying with ${seconds}s duration`, error);
         ack = await session.client.openOrder({ ...request, durationSeconds: seconds });
       }
@@ -512,22 +384,38 @@ export class TradeEngine {
         this.publish({ type: 'opened', order: updated });
       }
     } catch (error) {
-      this.fail(order, error instanceof Error ? error.message : String(error));
+      this.fail(order, errorMessage(error));
     }
   }
 
+  /** Ends an order's life: record the outcome, let the session go, tell whoever is listening. */
+  private finish(
+    orderId: string,
+    patch: Partial<Order>,
+    event: (order: Order) => EngineEvent,
+  ): void {
+    const updated = this.orders.update(orderId, patch);
+    this.detach(orderId);
+    if (updated) this.publish(event(updated));
+  }
+
   private missed(order: Order, price: number, reason: string): void {
-    const updated = this.orders.update(order.id, { status: 'expired', note: reason });
-    this.detach(order.id);
     this.logger.warn(`order ${order.id} missed its entry at ${price}: ${reason}`);
-    if (updated) this.publish({ type: 'missed', order: updated, price, reason });
+    this.finish(order.id, { status: 'expired', note: reason }, (updated) => ({
+      type: 'missed',
+      order: updated,
+      price,
+      reason,
+    }));
   }
 
   private fail(order: Order, message: string): void {
-    const updated = this.orders.update(order.id, { status: 'failed', note: message });
-    this.detach(order.id);
     this.logger.warn(`order ${order.id} failed: ${message}`);
-    if (updated) this.publish({ type: 'failed', order: updated, error: message });
+    this.finish(order.id, { status: 'failed', note: message }, (updated) => ({
+      type: 'failed',
+      order: updated,
+      error: message,
+    }));
   }
 
   private onDealClosed(deal: ClosedDeal, offset: number): void {
@@ -535,17 +423,17 @@ export class TradeEngine {
     if (!order || order.closedAt !== null) return;
 
     const status = deal.profit > 0 ? 'won' : deal.profit < 0 ? 'lost' : 'draw';
-    const updated = this.orders.update(order.id, {
-      status,
-      profit: deal.profit,
-      closePrice: deal.closePrice,
-      closedAt: deal.closeTimestamp !== null ? deal.closeTimestamp - offset : nowSeconds(),
-    });
-    this.detach(order.id);
-    if (updated) {
-      this.logger.info(`order ${order.id} settled ${status} (${deal.profit})`);
-      this.publish({ type: 'settled', order: updated });
-    }
+    this.logger.info(`order ${order.id} settled ${status} (${deal.profit})`);
+    this.finish(
+      order.id,
+      {
+        status,
+        profit: deal.profit,
+        closePrice: deal.closePrice,
+        closedAt: deal.closeTimestamp !== null ? deal.closeTimestamp - offset : nowSeconds(),
+      },
+      (updated) => ({ type: 'settled', order: updated }),
+    );
   }
 
   private housekeeping(): void {
@@ -561,12 +449,11 @@ export class TradeEngine {
       switch (order.status) {
         case 'pending': {
           if (order.validUntil !== null && now >= order.validUntil) {
-            const updated = this.orders.update(orderId, {
-              status: 'expired',
-              note: 'the trigger price was never reached',
-            });
-            this.detach(orderId);
-            if (updated) this.publish({ type: 'expired', order: updated });
+            this.finish(
+              orderId,
+              { status: 'expired', note: 'the trigger price was never reached' },
+              (updated) => ({ type: 'expired', order: updated }),
+            );
           }
           break;
         }

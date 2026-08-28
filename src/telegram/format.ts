@@ -1,4 +1,5 @@
 import { formatDuration, formatTime, timeframeLabel } from '../util/time.ts';
+import type { AssetInfo } from '../pocket/protocol.ts';
 import type { AccountMode, ChartType, Direction, ExpiryMode, Order, OrderStatus, TriggerMode } from '../types.ts';
 
 export function escapeHtml(text: string): string {
@@ -82,6 +83,15 @@ export const STATUS_LABEL: Record<OrderStatus, string> = {
   failed: '⚠️ ناموفق',
   expired: '⌛️ منقضی شده',
 };
+
+/** One broker asset as a single line: symbol, whether its market is open, payout and name. */
+export function assetLine(asset: AssetInfo): string {
+  return (
+    `<code>${escapeHtml(asset.symbol)}</code> · ${asset.isOpen ? '🟢 باز' : '🔴 بسته'}` +
+    (asset.payout === null ? '' : ` · پرداخت ${asset.payout}٪`) +
+    (asset.name ? ` · ${escapeHtml(asset.name)}` : '')
+  );
+}
 
 export function expiryDescription(order: Order): string {
   if (order.expiryMode === 'fixed') return `${formatDuration(order.durationSeconds)} (ثابت)`;

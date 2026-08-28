@@ -1,4 +1,3 @@
-import { createLogger } from '../../logger.ts';
 import { HTML, attempt } from '../reply.ts';
 import {
   CHART_CYCLE,
@@ -18,7 +17,6 @@ import {
   renderKeyboard,
   renderPanel,
   snapshot,
-  type Menu,
   type PanelView,
 } from './panel.ts';
 import { PROMPTS, type PromptField } from './prompts.ts';
@@ -27,11 +25,7 @@ import type { Context } from 'grammy';
 import type { SettingsStore } from '../../storage/settings.ts';
 import type { AccountMode } from '../../types.ts';
 
-export type { OrderDraft } from './draft.ts';
-export { TIME_FORMAT_HINT } from './prompts.ts';
-export { draftToSpec } from './draft.ts';
-
-const logger = createLogger('wizard');
+export { draftToSpec, type OrderDraft } from './draft.ts';
 
 const PROMPT_FIELDS: readonly PromptField[] = ['symbol', 'price', 'amount', 'duration', 'candles', 'valid'];
 
@@ -93,14 +87,6 @@ export class OrderWizard {
     state.rendered = snapshot(text, keyboard);
   }
 
-  hasDraft(chatId: number): boolean {
-    return this.states.has(chatId);
-  }
-
-  isAwaitingInput(chatId: number): boolean {
-    return this.states.get(chatId)?.awaiting != null;
-  }
-
   /** Drops a pending "type a value" prompt, for when the user runs a command instead of answering. */
   async abortPrompt(ctx: Context): Promise<void> {
     const chatId = ctx.chat?.id;
@@ -112,10 +98,10 @@ export class OrderWizard {
     await this.refresh(ctx, state);
   }
 
-  async handleCallback(ctx: Context): Promise<boolean> {
-    const data = ctx.callbackQuery?.data;
+  /** Handles one panel tap. `payload` is the callback data after the `w:` prefix. */
+  async handleCallback(ctx: Context, payload: string): Promise<void> {
     const chatId = ctx.chat?.id;
-    if (!data?.startsWith('w:') || chatId === undefined) return false;
+    if (chatId === undefined) return;
 
     const state = this.states.get(chatId);
     if (!state) return this.rejectTap(ctx, EXPIRED_NOTE, 'این پنل منقضی شده است. برای سفارش تازه /new را بزنید.');
@@ -126,7 +112,7 @@ export class OrderWizard {
       return this.rejectTap(ctx, REPLACED_NOTE, 'این پنل باطل شده است. از پنل تازه‌تر پایین چت استفاده کنید.');
     }
 
-    const [, action, argument] = data.split(':');
+    const [action, argument] = payload.split(':');
     const d = state.draft;
 
     // Any tap answers or abandons the question we were waiting on.
@@ -141,7 +127,7 @@ export class OrderWizard {
       await ctx.answerCallbackQuery({ text: `⌨️ ${PROMPTS[action].toast}` });
       await this.refresh(ctx, state);
       await this.sendPrompt(ctx, state, action);
-      return true;
+      return;
     }
 
     switch (action) {
@@ -191,7 +177,7 @@ export class OrderWizard {
         this.states.delete(chatId);
         await ctx.answerCallbackQuery({ text: 'لغو شد.' });
         await this.retirePanel(ctx, state, '❌ ساخت سفارش لغو شد.');
-        return true;
+        return;
 
       case 'submit': {
         if (d.symbol === null || d.triggerPrice === null) {
@@ -200,7 +186,7 @@ export class OrderWizard {
             show_alert: true,
           });
           await this.refresh(ctx, state);
-          return true;
+          return;
         }
         this.states.delete(chatId);
         state.menu = null;
@@ -208,15 +194,15 @@ export class OrderWizard {
         await ctx.answerCallbackQuery({ text: 'در حال ثبت…' });
         await this.freeze(ctx, state, renderPanel(state, true));
         await this.submit(d, ctx);
-        return true;
+        return;
       }
 
       default:
         await ctx.answerCallbackQuery();
-        return true;
+        return;
     }
 
-    return this.applied(ctx, state);
+    await this.applied(ctx, state);
   }
 
   async handleText(ctx: Context): Promise<boolean> {
@@ -290,16 +276,14 @@ export class OrderWizard {
   }
 
   /** The tail of most taps: acknowledge, then redraw the panel. */
-  private async applied(ctx: Context, state: DraftState, toast?: string): Promise<true> {
+  private async applied(ctx: Context, state: DraftState, toast?: string): Promise<void> {
     await ctx.answerCallbackQuery(toast === undefined ? undefined : { text: toast });
     await this.refresh(ctx, state);
-    return true;
   }
 
-  private async rejectTap(ctx: Context, note: string, toast: string): Promise<true> {
+  private async rejectTap(ctx: Context, note: string, toast: string): Promise<void> {
     await this.retireOrphan(ctx, note);
     await ctx.answerCallbackQuery({ text: toast });
-    return true;
   }
 
   private async refresh(ctx: Context, state: DraftState): Promise<void> {
@@ -310,11 +294,14 @@ export class OrderWizard {
     const next = snapshot(text, markup);
     if (next === state.rendered) return;
 
+    // Claimed before the call so a second tap on the same button does not send the very same edit.
     state.rendered = next;
-    await attempt(
+    const edited = await attempt(
       'could not refresh the wizard panel',
       ctx.api.editMessageText(state.draft.chatId, state.messageId, text, { ...HTML, reply_markup: markup }),
     );
+    // A real failure: forget what is on screen so the next tap redraws instead of assuming it matched.
+    if (!edited) state.rendered = null;
   }
 
   /** Leaves the panel readable but dead: the summary stays, the buttons go, a note says why. */
@@ -348,5 +335,3 @@ export class OrderWizard {
     );
   }
 }
-
-void logger;

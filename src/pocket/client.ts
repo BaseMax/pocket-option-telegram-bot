@@ -1,5 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { Emitter } from '../util/emitter.ts';
+import { awaitEvent } from '../util/async.ts';
+import { PendingRequests } from './pending.ts';
 import { createLogger, type Logger } from '../logger.ts';
 import { nowSeconds } from '../util/time.ts';
 import { redactAuth, type AuthPayload } from '../util/ssid.ts';
@@ -53,12 +55,6 @@ interface PocketClientEvents extends Record<string, readonly unknown[]> {
   authFailed: [string];
 }
 
-interface PendingOpen {
-  resolve: (ack: OpenOrderAck) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
 export class PocketOptionClient extends Emitter<PocketClientEvents> {
   readonly mode: AccountMode;
 
@@ -82,7 +78,7 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
   private everAuthenticated = false;
   private readonly subscriptions = new Map<string, number>();
   private assetList: readonly AssetInfo[] = [];
-  private readonly pendingOpens = new Map<number, PendingOpen>();
+  private readonly pendingOpens: PendingRequests<OpenOrderAck>;
   private readonly lastPrices = new Map<string, Tick>();
 
   private requestCounter = 0;
@@ -95,6 +91,7 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
     this.mode = options.mode;
     this.serverTimeOffset = options.serverTimeOffset;
     this.logger = createLogger(`po:${options.label}`);
+    this.pendingOpens = new PendingRequests(options.ackTimeoutMs, 'broker did not acknowledge the order in time');
   }
 
   start(): void {
@@ -106,8 +103,8 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
   stop(): void {
     this.stopped = true;
     this.clearTimers();
-    this.teardownSocket('client stopped');
-    this.failAllPending(new Error('client stopped'));
+    this.teardownSocket();
+    this.pendingOpens.rejectAll(new Error('client stopped'));
     this.removeAllListeners();
   }
 
@@ -137,18 +134,14 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
   lastPrice(symbol: string): Tick | undefined {
     return this.lastPrices.get(symbol);
   }
-  waitUntilReady(timeoutMs = 30_000): Promise<void> {
-    if (this.isReady) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        offAuth();
-        reject(new Error('timed out waiting for Pocket Option authentication'));
-      }, timeoutMs);
-      const offAuth = this.on('authenticated', () => {
-        clearTimeout(timer);
-        offAuth();
-        resolve();
-      });
+  async waitUntilReady(timeoutMs = 30_000): Promise<void> {
+    if (this.isReady) return;
+    await awaitEvent<true>({
+      subscribe: (deliver) => this.on('authenticated', () => deliver(true)),
+      timeoutMs,
+      onTimeout: () => {
+        throw new Error('timed out waiting for Pocket Option authentication');
+      },
     });
   }
 
@@ -231,7 +224,7 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
     this.connectedFlag = false;
     this.authenticatedFlag = false;
     this.clearTimers();
-    this.teardownSocket(reason);
+    this.teardownSocket();
 
     if (wasReady) this.logger.warn(`connection lost: ${reason}`);
     else this.logger.debug(`connection attempt failed: ${reason}`);
@@ -273,7 +266,7 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
     this.reconnectTimer = null;
   }
 
-  private teardownSocket(_reason: string): void {
+  private teardownSocket(): void {
     const socket = this.socket;
     this.socket = null;
     if (!socket) return;
@@ -344,8 +337,8 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
         const ack = parseOpenOrderAck(frame);
         if (!ack) return;
         this.learnTimeOffset(ack.openTimestamp, 'order acknowledgement');
-        if (ack.requestId !== null) this.resolvePending(ack.requestId, ack);
-        else this.resolveOldestPending(ack);
+        if (ack.requestId !== null) this.pendingOpens.resolve(ack.requestId, ack);
+        else this.pendingOpens.resolveOldest(ack);
         this.emit('orderAccepted', ack);
         return;
       }
@@ -354,8 +347,8 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
         const failure = parseOpenOrderFailure(frame);
         this.logger.warn(`broker rejected order: ${failure.error}`);
         const error = new Error(failure.error);
-        if (failure.requestId !== null) this.rejectPending(failure.requestId, error);
-        else this.failAllPending(error);
+        if (failure.requestId !== null) this.pendingOpens.reject(failure.requestId, error);
+        else this.pendingOpens.rejectAll(error);
         return;
       }
 
@@ -442,41 +435,11 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
     if (hasDuration) request.time = Math.round(params.durationSeconds as number);
     else request.closeAt = Math.round(params.closeAtServerTime as number);
 
-    const promise = new Promise<OpenOrderAck>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingOpens.delete(requestId);
-        reject(new Error('broker did not acknowledge the order in time'));
-      }, this.options.ackTimeoutMs);
-      this.pendingOpens.set(requestId, { resolve, reject, timer });
-    });
+    const promise = this.pendingOpens.add(requestId);
 
     this.logger.info(`placing ${request.action} ${request.asset}`, request);
     this.rawEmit(OUT.openOrder, request);
     return promise;
   }
 
-  private resolvePending(requestId: number, ack: OpenOrderAck): void {
-    const pending = this.pendingOpens.get(requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    this.pendingOpens.delete(requestId);
-    pending.resolve(ack);
-  }
-  private resolveOldestPending(ack: OpenOrderAck): void {
-    const first = this.pendingOpens.keys().next();
-    if (first.done) return;
-    this.resolvePending(first.value, ack);
-  }
-
-  private rejectPending(requestId: number, error: Error): void {
-    const pending = this.pendingOpens.get(requestId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    this.pendingOpens.delete(requestId);
-    pending.reject(error);
-  }
-
-  private failAllPending(error: Error): void {
-    for (const requestId of [...this.pendingOpens.keys()]) this.rejectPending(requestId, error);
-  }
 }

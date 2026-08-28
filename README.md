@@ -196,10 +196,30 @@ src/
     orders.ts           order repository
     settings.ts         runtime settings, overriding env
   telegram/
-    bot.ts              commands, access control, notifications
-    wizard.ts           the /new order builder panel
+    bot.ts              assembly: access control, message routing, wiring
+    runtime.ts          the deps and operations every command shares
+    router.ts           inline-button dispatch by callback prefix
+    reply.ts            HTML defaults, "working…" notices, best-effort API calls
+    texts.ts            the /start guide and its topic pages
+    notify.ts           engine events -> chat messages
+    limits.ts           order guard rails
     parse.ts            one-line /order syntax
     format.ts           all Persian user-facing copy
+    commands/
+      help.ts           /start, /help, /id and the guide pages
+      orders.ts         /new, /order, /list, /cancel, /history, /stats
+      market.ts         /balance, /price, /symbols, /status
+      settings.ts       /mode, /settings, /set, /session
+    wizard/
+      index.ts          the /new panel: state, taps, prompts, retiring dead panels
+      panel.ts          panel text and keyboards
+      draft.ts          the draft order and the answers typed into it
+      prompts.ts        what we ask when a value has to be typed
+  util/
+    time.ts             duration parsing/formatting and candle boundaries
+    ssid.ts             SSID payload parsing
+    errors.ts           one readable message out of anything thrown
+    emitter.ts          tiny typed event emitter
 ```
 
 Order lifecycle:

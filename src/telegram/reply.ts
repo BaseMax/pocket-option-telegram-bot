@@ -11,15 +11,22 @@ export const HTML = {
   link_preview_options: { is_disabled: true },
 } as const;
 
+/** Telegram refuses an edit that changes nothing, which for us means the screen already matches. */
+function isUnchanged(error: unknown): boolean {
+  return errorMessage(error).includes('message is not modified');
+}
+
 /**
  * Runs a Telegram call whose failure should not interrupt the user: an edit on a message they
- * already deleted, a delete on a message that is gone. Returns whether it went through.
+ * already deleted, a delete on a message that is gone. Returns whether the screen now says what
+ * we wanted, so "nothing to change" counts as success and is not worth a log line.
  */
 export async function attempt(what: string, call: Promise<unknown>): Promise<boolean> {
   try {
     await call;
     return true;
   } catch (error) {
+    if (isUnchanged(error)) return true;
     logger.debug(`${what}: ${errorMessage(error)}`);
     return false;
   }

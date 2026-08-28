@@ -1,5 +1,5 @@
 import type { Database, Statement } from 'bun:sqlite';
-import { ACTIVE_STATUSES, type AccountMode, type Order, type NewOrder, type OrderStatus } from '../types.ts';
+import { ACTIVE_STATUSES, type NewOrder, type Order } from '../types.ts';
 import { nowSeconds } from '../util/time.ts';
 import { createLogger } from '../logger.ts';
 
@@ -42,40 +42,7 @@ interface OrderRow {
   updated_at: number;
 }
 
-function toOrder(row: OrderRow): Order {
-  return {
-    id: row.id,
-    chatId: row.chat_id,
-    accountMode: row.account_mode as AccountMode,
-    symbol: row.symbol,
-    direction: row.direction as Order['direction'],
-    triggerPrice: row.trigger_price,
-    triggerMode: row.trigger_mode as Order['triggerMode'],
-    approachSide: row.approach_side as Order['approachSide'],
-    amount: row.amount,
-    expiryMode: row.expiry_mode as Order['expiryMode'],
-    durationSeconds: row.duration_seconds,
-    candleCount: row.candle_count,
-    timeframeSeconds: row.timeframe_seconds,
-    chartType: row.chart_type as Order['chartType'],
-    status: row.status as OrderStatus,
-    referencePrice: row.reference_price,
-    validUntil: row.valid_until,
-    triggeredPrice: row.triggered_price,
-    triggeredAt: row.triggered_at,
-    dealId: row.deal_id,
-    openPrice: row.open_price,
-    openedAt: row.opened_at,
-    closesAt: row.closes_at,
-    closePrice: row.close_price,
-    closedAt: row.closed_at,
-    profit: row.profit,
-    note: row.note,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
+/** The single source of truth for how a domain field maps to its column. */
 const COLUMN_OF: Record<keyof Order, string> = {
   id: 'id',
   chatId: 'chat_id',
@@ -108,6 +75,17 @@ const COLUMN_OF: Record<keyof Order, string> = {
   updatedAt: 'updated_at',
 };
 
+const FIELDS = Object.keys(COLUMN_OF) as (keyof Order)[];
+
+const ACTIVE_PLACEHOLDERS = ACTIVE_STATUSES.map(() => '?').join(', ');
+
+/** Rebuilds the domain object from a row, one field per entry in COLUMN_OF. */
+function toOrder(row: OrderRow): Order {
+  const order = {} as Record<keyof Order, unknown>;
+  for (const field of FIELDS) order[field] = row[COLUMN_OF[field] as keyof OrderRow];
+  return order as Order;
+}
+
 export class OrderRepository {
   private readonly db: Database;
   private readonly selectById: Statement<OrderRow, [string]>;
@@ -135,20 +113,9 @@ export class OrderRepository {
   create(input: NewOrder): Order {
     const now = nowSeconds();
     const order: Order = {
+      ...input,
       id: this.generateId(),
-      chatId: input.chatId,
-      accountMode: input.accountMode,
-      symbol: input.symbol,
-      direction: input.direction,
-      triggerPrice: input.triggerPrice,
-      triggerMode: input.triggerMode,
       approachSide: input.approachSide ?? 'any',
-      amount: input.amount,
-      expiryMode: input.expiryMode,
-      durationSeconds: input.durationSeconds,
-      candleCount: input.candleCount,
-      timeframeSeconds: input.timeframeSeconds,
-      chartType: input.chartType,
       status: 'pending',
       referencePrice: input.referencePrice ?? null,
       validUntil: input.validUntil ?? null,
@@ -166,44 +133,19 @@ export class OrderRepository {
       updatedAt: now,
     };
 
+    const params: Bindings = {};
+    for (const field of FIELDS) params[`$${field}`] = (order[field] ?? null) as Bindings[string];
+
     this.db
-      .query(
-        `INSERT INTO orders (
-           id, chat_id, account_mode, symbol, direction, trigger_price, trigger_mode,
-           approach_side, amount, expiry_mode, duration_seconds, candle_count,
-           timeframe_seconds, chart_type, status, reference_price, valid_until,
-           created_at, updated_at
-         ) VALUES (
-           $id, $chatId, $accountMode, $symbol, $direction, $triggerPrice, $triggerMode,
-           $approachSide, $amount, $expiryMode, $durationSeconds, $candleCount,
-           $timeframeSeconds, $chartType, $status, $referencePrice, $validUntil,
-           $createdAt, $updatedAt
-         )`,
+      .query<void, Bindings>(
+        `INSERT INTO orders (${FIELDS.map((field) => COLUMN_OF[field]).join(', ')})
+         VALUES (${FIELDS.map((field) => `$${field}`).join(', ')})`,
       )
-      .run({
-        $id: order.id,
-        $chatId: order.chatId,
-        $accountMode: order.accountMode,
-        $symbol: order.symbol,
-        $direction: order.direction,
-        $triggerPrice: order.triggerPrice,
-        $triggerMode: order.triggerMode,
-        $approachSide: order.approachSide,
-        $amount: order.amount,
-        $expiryMode: order.expiryMode,
-        $durationSeconds: order.durationSeconds,
-        $candleCount: order.candleCount,
-        $timeframeSeconds: order.timeframeSeconds,
-        $chartType: order.chartType,
-        $status: order.status,
-        $referencePrice: order.referencePrice,
-        $validUntil: order.validUntil,
-        $createdAt: order.createdAt,
-        $updatedAt: order.updatedAt,
-      });
+      .run(params);
 
     return order;
   }
+
   update(id: string, patch: Partial<Omit<Order, 'id' | 'createdAt'>>): Order | null {
     const entries = Object.entries(patch).filter(([key]) => key in COLUMN_OF);
     const assignments: string[] = [];
@@ -230,20 +172,18 @@ export class OrderRepository {
     return row ? toOrder(row) : null;
   }
   listActive(): Order[] {
-    const placeholders = ACTIVE_STATUSES.map(() => '?').join(', ');
     return this.db
       .query<OrderRow, string[]>(
-        `SELECT * FROM orders WHERE status IN (${placeholders}) ORDER BY created_at ASC`,
+        `SELECT * FROM orders WHERE status IN (${ACTIVE_PLACEHOLDERS}) ORDER BY created_at ASC`,
       )
       .all(...ACTIVE_STATUSES)
       .map(toOrder);
   }
 
   listActiveByChat(chatId: number): Order[] {
-    const placeholders = ACTIVE_STATUSES.map(() => '?').join(', ');
     return this.db
       .query<OrderRow, (string | number)[]>(
-        `SELECT * FROM orders WHERE chat_id = ? AND status IN (${placeholders}) ORDER BY created_at ASC`,
+        `SELECT * FROM orders WHERE chat_id = ? AND status IN (${ACTIVE_PLACEHOLDERS}) ORDER BY created_at ASC`,
       )
       .all(chatId, ...ACTIVE_STATUSES)
       .map(toOrder);
