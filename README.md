@@ -186,10 +186,14 @@ src/
     servers.ts          demo/real endpoint lists with failover
     protocol.ts         socket.io event names and defensive frame parsers
     client.ts           one authenticated connection: auth, keepalive, orders
+    pending.ts          requests waiting for a broker acknowledgement
     candles.ts          tick -> candle aggregation (candle / heikin-ashi / line)
+    symbols.ts          symbol spelling and matching against the asset list
   engine/
     trigger.ts          pure crossing detection
+    expiry.ts           when a trade closes: fixed seconds or a candle boundary
     session.ts          one session per (account, symbol) + reference counting
+    market.ts           balance, asset list, live price
     engine.ts           the order state machine
   storage/
     db.ts               SQLite schema (bun:sqlite, WAL)
@@ -217,6 +221,7 @@ src/
       prompts.ts        what we ask when a value has to be typed
   util/
     time.ts             duration parsing/formatting and candle boundaries
+    async.ts            waiting for the first value a subscription delivers
     ssid.ts             SSID payload parsing
     errors.ts           one readable message out of anything thrown
     emitter.ts          tiny typed event emitter
