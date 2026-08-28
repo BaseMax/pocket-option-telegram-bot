@@ -35,12 +35,16 @@ export class Session extends Emitter<SessionEvents> {
   private readonly series = new Map<number, CandleSeries>();
   private lastTick: Tick | null = null;
   private previousPrice: number | null = null;
+  private lostData = false;
+  private followsGap = false;
+  private readonly maxTickGapSeconds: number;
 
   constructor(mode: AccountMode, symbol: string | null, auth: AuthPayload, config: AppConfig) {
     super();
     this.mode = mode;
     this.symbol = symbol;
     this.logger = createLogger(`session:${mode}/${symbol ?? 'control'}`);
+    this.maxTickGapSeconds = config.engine.maxTickGapSeconds;
 
     this.client = new PocketOptionClient({
       mode,
@@ -55,7 +59,10 @@ export class Session extends Emitter<SessionEvents> {
       if (this.symbol) this.client.subscribe(this.symbol, this.primaryPeriod());
       this.emit('ready');
     });
-    this.client.on('disconnected', (reason) => this.emit('disconnected', reason));
+    this.client.on('disconnected', (reason) => {
+      this.lostData = true;
+      this.emit('disconnected', reason);
+    });
     this.client.on('authFailed', (reason) => this.emit('authFailed', reason));
     this.client.on('balance', (balance) => this.emit('balance', balance));
     this.client.on('dealClosed', (deal) => this.emit('dealClosed', deal));
@@ -69,6 +76,16 @@ export class Session extends Emitter<SessionEvents> {
     });
     this.client.on('tick', (tick) => {
       if (tick.symbol !== this.symbol) return;
+      const previousTime = this.lastTick?.time ?? null;
+      const silence = previousTime === null ? 0 : tick.time - previousTime;
+      this.followsGap = this.lostData || silence > this.maxTickGapSeconds;
+      if (this.followsGap && previousTime !== null) {
+        this.logger.warn(
+          `resuming after a ${Math.round(silence)}s gap in the price stream; ` +
+            'orders that would enter on this tick are treated as missed',
+        );
+      }
+      this.lostData = false;
       this.previousPrice = this.lastTick?.price ?? null;
       this.lastTick = tick;
       for (const series of this.series.values()) series.addTick(tick);
@@ -106,6 +123,10 @@ export class Session extends Emitter<SessionEvents> {
   }
   get priorPrice(): number | null {
     return this.previousPrice;
+  }
+
+  get tickFollowsGap(): boolean {
+    return this.followsGap;
   }
   private primaryPeriod(): number {
     if (this.series.size === 0) return 60;

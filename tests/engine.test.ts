@@ -118,6 +118,54 @@ describe('TradeEngine', () => {
     expect(session.opens[0]!.closeAtServerTime).toBe(1140);
   });
 
+  it('cancels a pending order whose trigger was crossed while the stream was down', async () => {
+    const { engine, orders, events } = harness();
+    const order = await engine.createOrder(base);
+    const session = engine.sessionManager.get('demo', 'GBPAUD_otc') as unknown as FakeSession;
+
+    session.tick(1000, 1.94);
+    await flush();
+    session.tick(1200, 1.97, true);
+    await flush();
+
+    expect(session.opens).toHaveLength(0);
+    expect(orders.get(order.id)!.status).toBe('expired');
+    expect(events.some((e) => e.type === 'missed')).toBe(true);
+  });
+
+  it('still enters normally when the same touch arrives without a gap', async () => {
+    const { engine, orders } = harness();
+    const order = await engine.createOrder(base);
+    const session = engine.sessionManager.get('demo', 'GBPAUD_otc') as unknown as FakeSession;
+
+    session.tick(1000, 1.94);
+    await flush();
+    session.tick(1010, 1.97);
+    await flush();
+
+    expect(session.opens).toHaveLength(1);
+    expect(orders.get(order.id)!.status).toBe('open');
+  });
+
+  it('cancels an armed order when its entry candle has already passed', async () => {
+    const { engine, orders, events } = harness();
+    const order = await engine.createOrder({ ...base, triggerMode: 'next_candle' });
+    const session = engine.sessionManager.get('demo', 'GBPAUD_otc') as unknown as FakeSession;
+
+    session.tick(1000, 1.94);
+    await flush();
+    session.tick(1020, 1.95);
+    await flush();
+    expect(orders.get(order.id)!.status).toBe('armed');
+
+    session.tick(1300, 1.95);
+    await flush();
+
+    expect(session.opens).toHaveLength(0);
+    expect(orders.get(order.id)!.status).toBe('expired');
+    expect(events.some((e) => e.type === 'missed')).toBe(true);
+  });
+
   it('falls back to a relative duration when the broker rejects closeAt', async () => {
     const { engine, orders } = harness();
     const order = await engine.createOrder({ ...base, expiryMode: 'floating', candleCount: 1 });

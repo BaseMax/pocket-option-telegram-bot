@@ -3,7 +3,7 @@
 A Telegram-controlled **conditional order** bot for [Pocket Option](https://pocketoption.com) binary options.
 
 You tell it a price. It keeps that instrument's live tick stream open, and the moment the market
-touches your price it opens the trade for you and reports back — entry, win, loss, and the account
+touches your price it opens the trade for you and reports back: entry, win, loss, and the account
 balance on every update.
 
 Because these are binary options, there is **no stop loss and no take profit** anywhere in the
@@ -20,11 +20,11 @@ system. The only exit is the expiry the trade was opened with.
 | Symbol | e.g. `GBPAUD_otc`, `EURUSD` |
 | Direction | buy (`call`) or sell (`put`) |
 | Trigger price | the price the market has to reach |
-| Entry mode | `touch` — enter on the very tick that hits the price<br>`next_candle` — the touch only arms the order; enter on the first tick of the next candle |
-| Expiry mode | `fixed` — stay in for exactly N seconds<br>`floating` — ride to the close of the current candle (or the N-th candle) |
+| Entry mode | `touch`: enter on the very tick that hits the price<br>`next_candle`: the touch only arms the order; enter on the first tick of the next candle |
+| Expiry mode | `fixed`: stay in for exactly N seconds<br>`floating`: ride to the close of the current candle (or the N-th candle) |
 | Chart | timeframe (5s … 4h) and type (candle / heikin-ashi / line) |
 | Amount | trade size in USD |
-| Account | demo or real — these are physically different broker clusters |
+| Account | demo or real, these are physically different broker clusters |
 | Validity | optional deadline after which an untriggered order is abandoned |
 
 **Triggering is a crossing, not proximity.** When the order is created the bot samples the market and
@@ -66,7 +66,7 @@ Then in Telegram: `/start`, and give the bot a broker session with `/session dem
 ۱. `bun install` را بزنید.
 ۲. فایل `.env.example` را به `.env` کپی کنید و `TELEGRAM_BOT_TOKEN` را بگذارید.
 ۳. `bun start` را اجرا کنید.
-۴. در تلگرام `/start` بزنید — اولین چت مالک ربات می‌شود.
+۴. در تلگرام `/start` بزنید، اولین چت مالک ربات می‌شود.
 ۵. با `/session demo <SSID>` نشست پاکت آپشن را ثبت کنید (راهنمای گرفتن SSID را با دستور `/session` ببینید).
 ۶. با `/new` سفارش بسازید یا از دستور تک‌خطی `/order` استفاده کنید.
 
@@ -103,7 +103,7 @@ Both auth dialects are supported, and the bot recognises either success reply:
 The bot deletes the message carrying the SSID immediately, then tests the connection so you get a
 straight yes/no rather than a silent failure.
 
-> ⏳ **Sessions are short-lived.** Capture the frame from a tab that is logged in *right now* — a
+> ⏳ **Sessions are short-lived.** Capture the frame from a tab that is logged in *right now*; a
 > token copied days earlier is almost always dead. The two failure modes are distinguished for you:
 > a `session` frame the broker rejects is dropped within milliseconds with `NotAuthorized`, while a
 > stale `sessionToken` frame is silently ignored and is reported after the auth timeout. In both
@@ -119,7 +119,7 @@ Telegram take precedence and persist in the database.
 
 | Command | Purpose |
 | --- | --- |
-| `/new` | Interactive order builder — every field on one inline keyboard |
+| `/new` | Interactive order builder, every field on one inline keyboard |
 | `/order …` | One-line order (see below) |
 | `/list` | Active orders, with live price and a cancel button |
 | `/cancel <id>` | Cancel a pending or armed order (an open trade cannot be cancelled) |
@@ -154,7 +154,7 @@ Telegram take precedence and persist in the database.
 | `candles` | `1`, `2`, … (implies `exp=float`) | `/set candles` |
 | `amount` | USD | `/set amount` |
 | `acc` | `demo`, `real` | `/mode` |
-| `valid` | `30m` — abandon if never triggered | none |
+| `valid` | `30m`, abandon if never triggered | none |
 
 Persian direction words (`خرید` / `فروش`) and Persian digits are accepted.
 
@@ -216,7 +216,7 @@ pending ──price touches trigger──┬─ touch mode ───────
 
 ## Configuration
 
-Everything is optional except `TELEGRAM_BOT_TOKEN`. See `.env.example` for the full list — the
+Everything is optional except `TELEGRAM_BOT_TOKEN`. See `.env.example` for the full list; the
 notable ones:
 
 | Variable | Default | Purpose |
@@ -237,8 +237,8 @@ bun test            # 79 tests, no network access required
 bun run typecheck   # tsc --noEmit
 ```
 
-The engine takes its `SessionManager` by injection, so the whole order state machine —
-triggering, arming, expiry arithmetic, settlement — is tested against a fake broker with no
+The engine takes its `SessionManager` by injection, so the whole order state machine
+(triggering, arming, expiry arithmetic, settlement) is tested against a fake broker with no
 sockets involved. The Telegram layer is tested by feeding synthetic updates through grammY and
 capturing the outgoing API calls.
 
@@ -248,7 +248,7 @@ capturing the outgoing API calls.
   reference only and is not used at runtime.
 - Pocket Option publishes no API contract. Every frame parser here is defensive, and the client
   treats account-scoped data (a balance push) as proof of authentication so a renamed success event
-  cannot strand it. A broker-side change can still break things — `/status` and the connection
+  cannot strand it. A broker-side change can still break things; `/status` and the connection
   notifications exist to make that obvious quickly.
 - The bot never cancels an open binary option, because the broker does not allow it.
 - Trade at your own risk. Real-money mode does exactly what you tell it to.

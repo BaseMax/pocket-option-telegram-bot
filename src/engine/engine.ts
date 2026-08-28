@@ -11,6 +11,7 @@ import type { ClosedDeal, OpenOrderAck } from '../pocket/protocol.ts';
 export type EngineEvent =
   | { type: 'triggered'; order: Order; price: number }
   | { type: 'armed'; order: Order; price: number; entryAt: number }
+  | { type: 'missed'; order: Order; price: number; reason: string }
   | { type: 'opened'; order: Order }
   | { type: 'settled'; order: Order }
   | { type: 'failed'; order: Order; error: string }
@@ -56,7 +57,7 @@ export class TradeEngine {
       if (order.status === 'placing') {
         const updated = this.orders.update(order.id, {
           status: 'failed',
-          note: 'bot restarted while the order was being sent — verify on the broker',
+          note: 'bot restarted while the order was being sent, verify on the broker',
         });
         if (updated) this.publish({ type: 'failed', order: updated, error: 'interrupted while placing' });
         continue;
@@ -313,13 +314,23 @@ export class TradeEngine {
         return;
       }
       if (isTouched(order, session.priorPrice, price)) {
+        if (session.tickFollowsGap) {
+          this.missed(order, price, 'the price crossed the trigger while the price stream was down');
+          return;
+        }
         this.onTriggered(order, price, tickTime, session.client.timeOffset);
       }
       return;
     }
 
     if (order.status === 'armed') {
-      this.maybeEnterOnNewCandle(order, tickTime, price, session.client.timeOffset);
+      this.maybeEnterOnNewCandle(
+        order,
+        tickTime,
+        price,
+        session.client.timeOffset,
+        session.tickFollowsGap,
+      );
     }
   }
 
@@ -347,11 +358,27 @@ export class TradeEngine {
     this.publish({ type: 'triggered', order: updated, price });
     void this.place(updated, tickTime);
   }
-  private maybeEnterOnNewCandle(order: Order, tickTime: number, price: number, offset: number): void {
+  private maybeEnterOnNewCandle(
+    order: Order,
+    tickTime: number,
+    price: number,
+    offset: number,
+    followsGap: boolean,
+  ): void {
     if (order.triggeredAt === null) return;
     const armedCandle = candleOpenTime(order.triggeredAt + offset, order.timeframeSeconds);
     const currentCandle = candleOpenTime(tickTime, order.timeframeSeconds);
     if (currentCandle <= armedCandle) return;
+
+    if (currentCandle > armedCandle + order.timeframeSeconds) {
+      const late = Math.round((currentCandle - armedCandle) / order.timeframeSeconds) - 1;
+      this.missed(order, price, `the entry candle passed ${late} candle(s) ago`);
+      return;
+    }
+    if (followsGap) {
+      this.missed(order, price, 'the entry candle opened while the price stream was down');
+      return;
+    }
 
     const updated = this.orders.update(order.id, { status: 'placing' });
     if (!updated) return;
@@ -430,6 +457,13 @@ export class TradeEngine {
     }
   }
 
+  private missed(order: Order, price: number, reason: string): void {
+    const updated = this.orders.update(order.id, { status: 'expired', note: reason });
+    this.detach(order.id);
+    this.logger.warn(`order ${order.id} missed its entry at ${price}: ${reason}`);
+    if (updated) this.publish({ type: 'missed', order: updated, price, reason });
+  }
+
   private fail(order: Order, message: string): void {
     const updated = this.orders.update(order.id, { status: 'failed', note: message });
     this.detach(order.id);
@@ -481,7 +515,15 @@ export class TradeEngine {
         case 'armed': {
           const price = attachment.session.price;
           const offset = attachment.session.client.timeOffset;
-          if (price !== null) this.maybeEnterOnNewCandle(order, now + offset, price, offset);
+          if (price !== null) {
+            this.maybeEnterOnNewCandle(
+              order,
+              now + offset,
+              price,
+              offset,
+              attachment.session.tickFollowsGap,
+            );
+          }
           break;
         }
 

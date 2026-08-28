@@ -228,16 +228,16 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
     this.clearTimers();
     this.teardownSocket(reason);
 
-    if (wasReady) this.logger.warn(`connection lost — ${reason}`);
-    else this.logger.debug(`connection attempt failed — ${reason}`);
+    if (wasReady) this.logger.warn(`connection lost: ${reason}`);
+    else this.logger.debug(`connection attempt failed: ${reason}`);
     this.emit('disconnected', reason);
 
     if (this.stopped) return;
     if (!wasReady && this.authSentAt > 0 && Date.now() - this.authSentAt < 3_000) {
-      this.rejectAuth('the broker closed the connection right after authentication — the session is invalid or expired');
+      this.rejectAuth('the broker closed the connection right after authentication: the session is invalid or expired');
     } else if (this.authTimeouts >= (this.everAuthenticated ? AUTH_TIMEOUTS_BEFORE_GIVING_UP : 1)) {
       this.rejectAuth(
-        'the broker ignored the auth frame — the session is almost certainly expired; ' +
+        'the broker ignored the auth frame: the session is almost certainly expired; ' +
           'capture a fresh one from a logged-in browser tab',
       );
     }

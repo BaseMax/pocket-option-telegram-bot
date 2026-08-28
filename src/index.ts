@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   process.on('unhandledRejection', (reason) => logger.error('unhandled rejection', reason));
 
   if (config.telegram.adminIds.length === 0 && settings.get('owners').length === 0) {
-    logger.warn('no admins configured — the first chat to send /start will claim this bot');
+    logger.warn('no admins configured; the first chat to send /start will claim this bot');
   }
   for (const mode of ['demo', 'real'] as const) {
     if (!engine.hasCredentials(mode)) {

@@ -10,13 +10,13 @@ export function escapeHtml(text: string): string {
 }
 
 export function formatPrice(price: number | null | undefined): string {
-  if (price === null || price === undefined || !Number.isFinite(price)) return '—';
+  if (price === null || price === undefined || !Number.isFinite(price)) return '-';
   const decimals = Math.abs(price) >= 100 ? 3 : 5;
   return price.toFixed(decimals).replace(/0+$/, '').replace(/\.$/, '');
 }
 
 export function formatMoney(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  if (value === null || value === undefined || !Number.isFinite(value)) return '-';
   return `${value >= 0 ? '' : '-'}$${Math.abs(value).toFixed(2)}`;
 }
 

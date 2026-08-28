@@ -34,6 +34,7 @@ const schema = z.object({
   SESSION_IDLE_TTL_SECONDS: numeric(60),
   ORDER_ACK_TIMEOUT_SECONDS: numeric(10),
   ORDER_SETTLE_GRACE_SECONDS: numeric(90),
+  MAX_TICK_GAP_SECONDS: numeric(30),
 });
 
 export type ChartTypeName = ChartType;
@@ -67,6 +68,7 @@ export interface AppConfig {
     sessionIdleTtlSeconds: number;
     orderAckTimeoutSeconds: number;
     orderSettleGraceSeconds: number;
+    maxTickGapSeconds: number;
   };
 }
 
@@ -116,6 +118,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       sessionIdleTtlSeconds: c.SESSION_IDLE_TTL_SECONDS,
       orderAckTimeoutSeconds: c.ORDER_ACK_TIMEOUT_SECONDS,
       orderSettleGraceSeconds: c.ORDER_SETTLE_GRACE_SECONDS,
+      maxTickGapSeconds: c.MAX_TICK_GAP_SECONDS,
     },
   };
 }

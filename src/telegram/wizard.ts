@@ -46,7 +46,7 @@ const PROMPTS: Record<PromptField, string> = {
   amount: 'مبلغ معامله را به دلار بفرستید (مثلاً <code>5</code>):',
   duration: 'مدت ماندن در معامله را بفرستید (مثلاً <code>60</code> یا <code>1m</code> یا <code>31s</code>):',
   candles: 'چند کندل در معامله بماند؟ (مثلاً <code>1</code>):',
-  valid: 'اعتبار سفارش تا چه مدت؟ (مثلاً <code>30m</code> — برای بی‌نهایت بفرستید <code>0</code>):',
+  valid: 'اعتبار سفارش تا چه مدت؟ (مثلاً <code>30m</code>، برای بی‌نهایت بفرستید <code>0</code>):',
 };
 
 const DIRECTION_CYCLE: Direction[] = ['call', 'put'];
@@ -120,8 +120,8 @@ export class OrderWizard {
     const lines = [
       '🧾 <b>ساخت سفارش جدید</b>',
       '',
-      `نماد: <b>${d.symbol ? escapeHtml(d.symbol) : '— انتخاب نشده —'}</b>`,
-      `قیمت ورود هدف: <b>${d.triggerPrice === null ? '— تعیین نشده —' : formatPrice(d.triggerPrice)}</b>`,
+      `نماد: <b>${d.symbol ? escapeHtml(d.symbol) : '(انتخاب نشده)'}</b>`,
+      `قیمت ورود هدف: <b>${d.triggerPrice === null ? '(تعیین نشده)' : formatPrice(d.triggerPrice)}</b>`,
       `جهت: <b>${DIRECTION_SHORT[d.direction]}</b>`,
       `نحوهٔ ورود: <b>${TRIGGER_LABEL[d.triggerMode]}</b>`,
       d.expiryMode === 'fixed'
@@ -144,8 +144,8 @@ export class OrderWizard {
   private renderKeyboard(state: DraftState): InlineKeyboard {
     const d = state.draft;
     const keyboard = new InlineKeyboard()
-      .text(`نماد: ${d.symbol ?? '—'}`, 'w:symbol')
-      .text(`قیمت: ${d.triggerPrice === null ? '—' : formatPrice(d.triggerPrice)}`, 'w:price')
+      .text(`نماد: ${d.symbol ?? '-'}`, 'w:symbol')
+      .text(`قیمت: ${d.triggerPrice === null ? '-' : formatPrice(d.triggerPrice)}`, 'w:price')
       .row()
       .text(`جهت: ${d.direction === 'call' ? 'خرید' : 'فروش'}`, 'w:direction')
       .text(`حساب: ${d.accountMode === 'demo' ? 'دمو' : 'ریل'}`, 'w:account')

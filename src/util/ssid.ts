@@ -117,7 +117,7 @@ export function parseSsid(input: string, mode: AccountMode, uidFallback = 0): Au
     return fromObject(record, mode, uidFallback);
   }
   if (uidFallback === 0) {
-    throw new SsidParseError('a bare session id also needs a uid — set PO_DEMO_UID / PO_REAL_UID');
+    throw new SsidParseError('a bare session id also needs a uid: set PO_DEMO_UID / PO_REAL_UID');
   }
   return buildLegacy(text, uidFallback, mode, {});
 }

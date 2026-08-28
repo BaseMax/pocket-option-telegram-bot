@@ -21,6 +21,7 @@ export class FakeSession extends Emitter<Record<string, readonly unknown[]>> {
   price: number | null = null;
   priorPrice: number | null = null;
   lastTickTime: number | null = null;
+  tickFollowsGap = false;
   balance: number | null = 500;
   readonly opens: OpenCall[] = [];
   failWith: string | null = null;
@@ -60,10 +61,11 @@ export class FakeSession extends Emitter<Record<string, readonly unknown[]>> {
   get isReady(): boolean {
     return true;
   }
-  tick(time: number, price: number): void {
+  tick(time: number, price: number, followsGap = false): void {
     this.priorPrice = this.price;
     this.price = price;
     this.lastTickTime = time;
+    this.tickFollowsGap = followsGap;
     this.emit('tick', { symbol: this.symbol ?? '', time, price } satisfies Tick);
   }
 

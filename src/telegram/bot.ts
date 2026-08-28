@@ -40,20 +40,20 @@ const HELP = `
 سفارش شرطی ثبت می‌کنید؛ ربات قیمت لحظه‌ای همان نماد را زنده نگه می‌دارد و به‌محض رسیدن قیمت، معامله را باز می‌کند و نتیجه را خبر می‌دهد.
 
 <b>دستورها</b>
-/new — ساخت سفارش با دکمه‌ها
-/order — ساخت سریع سفارش در یک خط
-/list — سفارش‌های فعال
-/cancel &lt;کد&gt; — لغو سفارش
-/history — آخرین سفارش‌ها
-/stats — آمار امروز
-/balance — موجودی حساب
-/price &lt;نماد&gt; — قیمت لحظه‌ای
-/status — وضعیت اتصال‌ها
-/mode demo|real — تغییر حساب پیش‌فرض
-/settings — نمایش تنظیمات
-/set &lt;کلید&gt; &lt;مقدار&gt; — تغییر تنظیمات
-/session demo|real &lt;SSID&gt; — ثبت نشست پاکت آپشن
-/id — نمایش شناسهٔ چت
+/new: ساخت سفارش با دکمه‌ها
+/order: ساخت سریع سفارش در یک خط
+/list: سفارش‌های فعال
+/cancel &lt;کد&gt;: لغو سفارش
+/history: آخرین سفارش‌ها
+/stats: آمار امروز
+/balance: موجودی حساب
+/price &lt;نماد&gt;: قیمت لحظه‌ای
+/status: وضعیت اتصال‌ها
+/mode demo|real: تغییر حساب پیش‌فرض
+/settings: نمایش تنظیمات
+/set &lt;کلید&gt; &lt;مقدار&gt;: تغییر تنظیمات
+/session demo|real &lt;SSID&gt;: ثبت نشست پاکت آپشن
+/id: نمایش شناسهٔ چت
 
 <b>نمونهٔ دستور تک‌خطی</b>
 <code>/order GBPAUD_otc buy 1.95320 tf=1m dur=60 amount=1 acc=demo</code>
@@ -83,12 +83,12 @@ const SESSION_HELP = `
 
 هر دو قالب پذیرفته می‌شود:
 • <code>{"sessionToken":"…","uid":"…","lang":"fa","currentUrl":"cabinet/demo-quick-high-low","isChart":1}</code>
-  (قالب فعلی p.finance — پاسخ موفق آن <code>42["auth/success"]</code> است)
+  (قالب فعلی p.finance، پاسخ موفق آن <code>42["auth/success"]</code> است)
 • <code>{"session":"…","isDemo":1,"uid":…,"platform":1}</code>
-  (قالب قدیمی‌تر — پاسخ موفق آن <code>successauth</code> است)
+  (قالب قدیمی‌تر، پاسخ موفق آن <code>successauth</code> است)
 
 ⏳ این توکن ماندگار نیست: با خروج از حساب یا با گذشت زمان باطل می‌شود. اگر باطل شود ربات تلاش مجدد را متوقف می‌کند، به شما خبر می‌دهد و سفارش‌هایتان دست‌نخورده می‌مانند تا SSID تازه بفرستید.
-💡 توکن را از تبی بردارید که همان لحظه باز و لاگین است — توکنی که چند روز پیش کپی شده تقریباً همیشه باطل است.
+💡 توکن را از تبی بردارید که همان لحظه باز و لاگین است؛ توکنی که چند روز پیش کپی شده تقریباً همیشه باطل است.
 `.trim();
 
 export async function publishCommands(bot: Bot): Promise<void> {
@@ -442,10 +442,10 @@ export function createBot(deps: BotDeps): Bot {
     const sessions = engine.sessionManager.list();
     const lines = sessions.map(({ key, session, holders }) => {
       const state = session.isReady ? '🟢 متصل' : '🔴 قطع';
-      const price = session.price === null ? '—' : formatPrice(session.price);
-      const endpoint = session.client.endpoint?.url ?? '—';
+      const price = session.price === null ? '-' : formatPrice(session.price);
+      const endpoint = session.client.endpoint?.url ?? '-';
       return (
-        `<b>${escapeHtml(key)}</b> — ${state}\n` +
+        `<b>${escapeHtml(key)}</b> · ${state}\n` +
         `   سرور: <code>${escapeHtml(endpoint)}</code>\n` +
         `   قیمت: <code>${price}</code> · سفارش‌های وابسته: ${holders}\n` +
         `   موجودی: ${formatMoney(session.balance)} · اختلاف ساعت سرور: ${session.client.timeOffset}s`
@@ -507,7 +507,7 @@ export function createBot(deps: BotDeps): Bot {
     const [key, ...valueParts] = ctx.match.trim().split(/\s+/);
     const value = valueParts.join(' ').trim();
     if (!key || value === '') {
-      await ctx.reply('ساختار: <code>/set &lt;کلید&gt; &lt;مقدار&gt;</code> — کلیدها را با /settings ببینید.', {
+      await ctx.reply('ساختار: <code>/set &lt;کلید&gt; &lt;مقدار&gt;</code>؛ کلیدها را با /settings ببینید.', {
         parse_mode: 'HTML',
       });
       return;
@@ -706,7 +706,7 @@ export function createBot(deps: BotDeps): Bot {
         `🔑 <b>نشست ${ACCOUNT_LABEL[event.mode]} رد شد</b>\n\n` +
         `${escapeHtml(event.detail)}\n\n` +
         'سفارش‌های شما دست‌نخورده باقی مانده‌اند اما تا ثبت نشست تازه دنبال نمی‌شوند.\n' +
-        `برای ثبت مجدد: <code>/session ${event.mode} &lt;SSID&gt;</code> — راهنمای برداشتن SSID را با /session ببینید.`;
+        `برای ثبت مجدد: <code>/session ${event.mode} &lt;SSID&gt;</code>؛ راهنمای برداشتن SSID را با /session ببینید.`;
       for (const chatId of recipients()) void send(chatId, text);
       return;
     }
@@ -726,7 +726,7 @@ export function createBot(deps: BotDeps): Bot {
 
       case 'triggered':
         text =
-          `🎯 <b>قیمت به هدف رسید — در حال ورود</b>\n\n${orderHeadline(order)}\n` +
+          `🎯 <b>قیمت به هدف رسید، در حال ورود</b>\n\n${orderHeadline(order)}\n` +
           `قیمت برخورد: <code>${formatPrice(event.price)}</code>\n` +
           `${DIRECTION_LABEL[order.direction]} · ${TRIGGER_LABEL[order.triggerMode]}`;
         break;
@@ -756,6 +756,14 @@ export function createBot(deps: BotDeps): Bot {
         text =
           `⌛️ <b>سفارش منقضی شد</b>\n\n${orderHeadline(order)}\n` +
           `قیمت تا پایان مهلت به <code>${formatPrice(order.triggerPrice)}</code> نرسید.`;
+        break;
+
+      case 'missed':
+        text =
+          `🚫 <b>فرصت از دست رفت، سفارش لغو شد</b>\n\n${orderHeadline(order)}\n` +
+          `قیمت هنگام قطعی جریان قیمت از <code>${formatPrice(order.triggerPrice)}</code> عبور کرد.\n` +
+          `قیمت فعلی: <code>${formatPrice(event.price)}</code>\n` +
+          'برای ورود با قیمت تازه، سفارش جدید ثبت کنید.';
         break;
 
       case 'settlement_pending':
