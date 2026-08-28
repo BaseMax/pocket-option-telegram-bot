@@ -36,7 +36,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Project
 .env
 .env.local
-data/
+data/*
+!data/.gitkeep
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

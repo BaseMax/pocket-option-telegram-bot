@@ -1,7 +1,7 @@
 import { Emitter } from '../src/util/emitter.ts';
 import { loadConfig } from '../src/config.ts';
 import type { AccountMode, Tick } from '../src/types.ts';
-import type { OpenOrderAck, ClosedDeal } from '../src/pocket/protocol.ts';
+import type { AssetInfo, OpenOrderAck, ClosedDeal } from '../src/pocket/protocol.ts';
 
 export const testConfig = loadConfig({
   TELEGRAM_BOT_TOKEN: '123456:test-token-value',
@@ -22,6 +22,7 @@ export class FakeSession extends Emitter<Record<string, readonly unknown[]>> {
   priorPrice: number | null = null;
   lastTickTime: number | null = null;
   tickFollowsGap = false;
+  assets: AssetInfo[] = [];
   balance: number | null = 500;
   readonly opens: OpenCall[] = [];
   failWith: string | null = null;
@@ -74,9 +75,18 @@ export class FakeSession extends Emitter<Record<string, readonly unknown[]>> {
   }
 }
 
+export const FAKE_ASSETS: AssetInfo[] = [
+  { symbol: 'GBPAUD_otc', name: 'GBP/AUD OTC', payout: 86, isOpen: true },
+  { symbol: 'GBPAUD', name: 'GBP/AUD', payout: 50, isOpen: false },
+  { symbol: 'EURUSD_otc', name: 'EUR/USD OTC', payout: 92, isOpen: true },
+  { symbol: 'EURUSD', name: 'EUR/USD', payout: 50, isOpen: false },
+  { symbol: '#AAPL_otc', name: 'Apple OTC', payout: 41, isOpen: true },
+];
+
 export class FakeSessionManager {
   readonly sessions = new Map<string, FakeSession>();
   credentials = true;
+  assets: AssetInfo[] = [...FAKE_ASSETS];
 
   hasCredentials(): boolean {
     return this.credentials;
@@ -86,6 +96,7 @@ export class FakeSessionManager {
     let session = this.sessions.get(key);
     if (!session) {
       session = new FakeSession(mode, symbol);
+      session.assets = this.assets;
       this.sessions.set(key, session);
     }
     return session;

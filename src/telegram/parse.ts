@@ -1,23 +1,21 @@
-import { parseDuration } from '../util/time.ts';
-import type { AccountMode, ChartType, Direction, ExpiryMode, TriggerMode } from '../types.ts';
+import { normalizeDigits, parseDuration } from '../util/time.ts';
+import { normalizeSymbol } from '../pocket/symbols.ts';
+import type { AccountMode, ChartType, Direction, ExpiryMode, OrderSpec, TriggerMode } from '../types.ts';
 import type { BotSettings } from '../storage/settings.ts';
 
-export interface ParsedOrder {
-  symbol: string;
-  direction: Direction;
-  triggerPrice: number;
-  triggerMode: TriggerMode;
-  timeframeSeconds: number;
-  chartType: ChartType;
-  expiryMode: ExpiryMode;
-  durationSeconds: number;
-  candleCount: number;
-  amount: number;
-  accountMode: AccountMode;
-  validForSeconds: number | null;
-}
+export { normalizeSymbol };
 
-export type ParseResult = { ok: true; order: ParsedOrder } | { ok: false; error: string };
+export type ParseResult = { ok: true; order: OrderSpec } | { ok: false; error: string };
+
+/** Lower-cases and unifies the Persian letter shapes so an alias matches however it was typed. */
+export function normalizeWord(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\u200c\u200e\u200f]/g, '')
+    .replace(/\u064a/g, '\u06cc')
+    .replace(/\u0643/g, '\u06a9');
+}
 
 const DIRECTION_ALIASES: Record<string, Direction> = {
   buy: 'call',
@@ -26,60 +24,97 @@ const DIRECTION_ALIASES: Record<string, Direction> = {
   long: 'call',
   خرید: 'call',
   بالا: 'call',
+  صعودی: 'call',
   sell: 'put',
   put: 'put',
   down: 'put',
   short: 'put',
   فروش: 'put',
   پایین: 'put',
+  نزولی: 'put',
 };
 
 const TRIGGER_ALIASES: Record<string, TriggerMode> = {
   touch: 'touch',
   now: 'touch',
   instant: 'touch',
+  لحظهای: 'touch',
+  لحظه: 'touch',
+  برخورد: 'touch',
   next: 'next_candle',
   next_candle: 'next_candle',
   candle: 'next_candle',
+  بعدی: 'next_candle',
+  کندلبعدی: 'next_candle',
 };
 
 const EXPIRY_ALIASES: Record<string, ExpiryMode> = {
   fixed: 'fixed',
   static: 'fixed',
+  ثابت: 'fixed',
   float: 'floating',
   floating: 'floating',
   candle: 'floating',
+  شناور: 'floating',
 };
 
 const CHART_ALIASES: Record<string, ChartType> = {
   candle: 'candle',
   candles: 'candle',
   ohlc: 'candle',
+  japanese: 'candle',
+  کندل: 'candle',
+  کندلی: 'candle',
+  شمعی: 'candle',
   ha: 'heikin_ashi',
   heikin: 'heikin_ashi',
   heikin_ashi: 'heikin_ashi',
+  heikinashi: 'heikin_ashi',
+  'heikin-ashi': 'heikin_ashi',
+  هایکن: 'heikin_ashi',
+  هایکنآشی: 'heikin_ashi',
   line: 'line',
   area: 'line',
+  خطی: 'line',
 };
 
 const ACCOUNT_ALIASES: Record<string, AccountMode> = {
   demo: 'demo',
   practice: 'demo',
+  دمو: 'demo',
+  آزمایشی: 'demo',
+  تمرینی: 'demo',
   real: 'real',
   live: 'real',
+  ریل: 'real',
+  واقعی: 'real',
 };
 
-export function normalizeSymbol(raw: string): string {
-  const upper = raw.trim().toUpperCase().replace(/[\s/-]+/g, '');
-  return upper.replace(/_?OTC$/, '_otc');
+/** Shared readers for the choice words, so /set, /mode and /order all accept the same spellings. */
+export function parseDirection(raw: string): Direction | undefined {
+  return DIRECTION_ALIASES[normalizeWord(raw)];
+}
+
+export function parseTriggerMode(raw: string): TriggerMode | undefined {
+  return TRIGGER_ALIASES[normalizeWord(raw)];
+}
+
+export function parseExpiryMode(raw: string): ExpiryMode | undefined {
+  return EXPIRY_ALIASES[normalizeWord(raw)];
+}
+
+export function parseChartType(raw: string): ChartType | undefined {
+  return CHART_ALIASES[normalizeWord(raw)];
+}
+
+export function parseAccountMode(raw: string): AccountMode | undefined {
+  return ACCOUNT_ALIASES[normalizeWord(raw)];
 }
 
 export function parseNumber(raw: string): number | null {
-  const normalized = raw
-    .trim()
-    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
-    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-    .replace(/,/g, '');
+  const normalized = normalizeDigits(raw.trim())
+    .replace(/[,\s]/g, '')
+    .replace(/^\+/, '');
   if (normalized === '') return null;
   const value = Number(normalized);
   return Number.isFinite(value) ? value : null;
@@ -93,7 +128,7 @@ export function parseOrderCommand(input: string, defaults: BotSettings): ParseRe
 
   const [symbolToken, directionToken, priceToken, ...rest] = tokens as [string, string, string, ...string[]];
 
-  const direction = DIRECTION_ALIASES[directionToken.toLowerCase()];
+  const direction = parseDirection(directionToken);
   if (!direction) return { ok: false, error: `جهت معامله نامعتبر است: ${directionToken}` };
 
   const triggerPrice = parseNumber(priceToken);
@@ -101,7 +136,7 @@ export function parseOrderCommand(input: string, defaults: BotSettings): ParseRe
     return { ok: false, error: `قیمت نامعتبر است: ${priceToken}` };
   }
 
-  const order: ParsedOrder = {
+  const order: OrderSpec = {
     symbol: normalizeSymbol(symbolToken),
     direction,
     triggerPrice,
@@ -119,7 +154,7 @@ export function parseOrderCommand(input: string, defaults: BotSettings): ParseRe
   for (const token of rest) {
     const separator = token.indexOf('=');
     if (separator < 0) return { ok: false, error: `پارامتر نامعتبر: ${token} (باید به شکل key=value باشد)` };
-    const key = token.slice(0, separator).toLowerCase();
+    const key = normalizeWord(token.slice(0, separator));
     const value = token.slice(separator + 1);
 
     switch (key) {
@@ -156,27 +191,27 @@ export function parseOrderCommand(input: string, defaults: BotSettings): ParseRe
       }
       case 'entry':
       case 'trigger': {
-        const mode = TRIGGER_ALIASES[value.toLowerCase()];
+        const mode = parseTriggerMode(value);
         if (!mode) return { ok: false, error: `نحوهٔ ورود نامعتبر: ${value} (touch یا next)` };
         order.triggerMode = mode;
         break;
       }
       case 'exp':
       case 'expiry': {
-        const mode = EXPIRY_ALIASES[value.toLowerCase()];
+        const mode = parseExpiryMode(value);
         if (!mode) return { ok: false, error: `نوع انقضا نامعتبر: ${value} (fixed یا float)` };
         order.expiryMode = mode;
         break;
       }
       case 'chart': {
-        const chart = CHART_ALIASES[value.toLowerCase()];
+        const chart = parseChartType(value);
         if (!chart) return { ok: false, error: `نوع چارت نامعتبر: ${value}` };
         order.chartType = chart;
         break;
       }
       case 'acc':
       case 'account': {
-        const account = ACCOUNT_ALIASES[value.toLowerCase()];
+        const account = parseAccountMode(value);
         if (!account) return { ok: false, error: `نوع حساب نامعتبر: ${value} (demo یا real)` };
         order.accountMode = account;
         break;

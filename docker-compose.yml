@@ -1,0 +1,49 @@
+services:
+  bot:
+    build: .
+    image: pocket-option-telegram-bot:latest
+    container_name: pocket-option-bot
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /app/data/bot.sqlite
+      HEARTBEAT_PATH: /app/data/heartbeat
+
+    # The SQLite file is written as this user. Set DOCKER_UID / DOCKER_GID in
+    # .env to the owner of ./data (id -u / id -g) or the bot cannot write.
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+
+    # The SQLite database lives in the project directory on the host, never in
+    # Docker's own storage. create_host_path is off on purpose: if the directory
+    # is missing, compose says so instead of creating a root owned one that the
+    # bot then cannot write.
+    volumes:
+      - type: bind
+        source: ${DATA_DIR:-./data}
+        target: /app/data
+        bind:
+          create_host_path: false
+
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+    healthcheck:
+      test: ["CMD", "bun", "run", "docker/healthcheck.ts"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

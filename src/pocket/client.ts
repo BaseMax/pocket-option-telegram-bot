@@ -81,6 +81,7 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
   private authTimeouts = 0;
   private everAuthenticated = false;
   private readonly subscriptions = new Map<string, number>();
+  private assetList: readonly AssetInfo[] = [];
   private readonly pendingOpens = new Map<number, PendingOpen>();
   private readonly lastPrices = new Map<string, Tick>();
 
@@ -125,6 +126,10 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
   get endpoint(): ServerEndpoint | undefined {
     return this.options.servers[this.endpointIndex % this.options.servers.length];
   }
+  get assets(): readonly AssetInfo[] {
+    return this.assetList;
+  }
+
   get timeOffset(): number {
     return this.serverTimeOffset;
   }
@@ -328,7 +333,10 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
 
       case IN.updateAssets: {
         const assets = parseAssets(frame);
-        if (assets.length > 0) this.emit('assets', assets);
+        if (assets.length > 0) {
+          this.assetList = assets;
+          this.emit('assets', assets);
+        }
         return;
       }
 

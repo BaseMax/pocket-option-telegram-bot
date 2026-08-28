@@ -8,6 +8,8 @@ import { createLogger } from './logger.ts';
 
 const logger = createLogger('main');
 
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
 async function main(): Promise<void> {
   const config = loadConfig();
 
@@ -20,11 +22,20 @@ async function main(): Promise<void> {
 
   engine.start();
 
+  const beat = (): void => {
+    Bun.write(config.heartbeatPath, String(Date.now())).catch((error: unknown) =>
+      logger.warn('could not write the heartbeat file', error),
+    );
+  };
+  beat();
+  const heartbeat = setInterval(beat, HEARTBEAT_INTERVAL_MS);
+
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info(`received ${signal}, shutting down`);
+    clearInterval(heartbeat);
     try {
       await bot.stop();
     } catch (error) {

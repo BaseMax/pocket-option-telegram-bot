@@ -1,12 +1,23 @@
 import { Bot, InlineKeyboard, type Context } from 'grammy';
-import { OrderWizard, type OrderDraft } from './wizard.ts';
-import { parseOrderCommand, normalizeSymbol, parseNumber } from './parse.ts';
+import { OrderWizard, TIME_FORMAT_HINT, type OrderDraft } from './wizard.ts';
+import {
+  parseOrderCommand,
+  normalizeSymbol,
+  parseNumber,
+  parseAccountMode,
+  parseChartType,
+  parseExpiryMode,
+  parseTriggerMode,
+} from './parse.ts';
 import {
   ACCOUNT_LABEL,
+  CHART_HELP,
   CHART_LABEL,
   DIRECTION_LABEL,
+  EXPIRY_HELP,
   EXPIRY_LABEL,
   STATUS_LABEL,
+  TRIGGER_HELP,
   TRIGGER_LABEL,
   escapeHtml,
   formatMoney,
@@ -17,6 +28,7 @@ import {
 } from './format.ts';
 import { MissingCredentialsError } from '../engine/session.ts';
 import { createLogger } from '../logger.ts';
+import type { AssetInfo } from '../pocket/protocol.ts';
 import { formatDuration, formatTime, nowSeconds, parseDuration, timeframeLabel } from '../util/time.ts';
 import { parseSsid, SsidParseError } from '../util/ssid.ts';
 import type { AppConfig } from '../config.ts';
@@ -34,6 +46,96 @@ export interface BotDeps {
   engine: TradeEngine;
 }
 
+const GUIDE = `
+🤖 <b>ربات معاملات پاکت آپشن</b>
+
+این ربات برای شما «سفارش شرطی» می‌سازد. شما می‌گویید روی کدام نماد، در چه قیمتی، در چه جهتی و با چه مبلغی؛ ربات قیمت لحظه‌ای همان نماد را زنده دنبال می‌کند و همان لحظه‌ای که قیمت به عدد شما رسید معامله را باز می‌کند، تا پایان مدت نگه می‌دارد و نتیجه (برد یا باخت و سود و زیان) را خبر می‌دهد.
+
+<b>🚀 شروع در سه قدم</b>
+۱) نشست حساب را ثبت کنید: /session
+۲) /new را بزنید تا پنل ساخت سفارش باز شود.
+۳) نماد و قیمت را بدهید و «✅ ثبت سفارش» را بزنید.
+
+<b>⌨️ مهم‌ترین نکتهٔ پنل /new</b>
+دکمه‌هایی که کنارشان ✍️ هست (نماد، قیمت، مبلغ، مدت، تعداد کندل، اعتبار) مقدارشان را <b>از شما می‌پرسند</b>: روی دکمه بزنید، ربات یک پیام می‌فرستد و کادر پاسخ باز می‌شود، بعد مقدار را تایپ کنید و بفرستید.
+بقیهٔ دکمه‌ها (جهت، حساب، ورود، انقضا) با هر بار زدن بین حالت‌ها می‌چرخند و «چارت» و «تایم‌فریم» فهرست انتخاب باز می‌کنند.
+
+<b>🧭 یک مثال کامل</b>
+می‌خواهید اگر قیمت <code>EURUSD</code> به <code>1.08540</code> رسید، یک معاملهٔ فروش ۶۰ ثانیه‌ای با ۵ دلار روی حساب دمو باز شود و اگر تا نیم ساعت دیگر قیمت به آن نرسید سفارش خودبه‌خود لغو شود:
+<code>/order EURUSD sell 1.08540 dur=60 amount=5 acc=demo valid=30m</code>
+همین کار با پنل: /new ← نماد <code>EURUSD</code> ← قیمت <code>1.08540</code> ← جهت: فروش ← مدت: <code>1m</code> ← مبلغ: <code>5</code> ← اعتبار: <code>30m</code> ← ثبت.
+
+<b>📚 راهنماهای بیشتر</b>
+دکمه‌های پایین را بزنید.
+`.trim();
+
+const CHART_GUIDE = `
+📈 <b>نوع چارت: کندلی، هایکن‌آشی یا خطی؟</b>
+
+این گزینه تعیین می‌کند ربات کندل‌های نماد را چطور بسازد و به شما نشان دهد. قیمت ورود و خروج معامله همیشه قیمت واقعی بازار است و با این گزینه عوض نمی‌شود؛ چیزی که عوض می‌شود شکل کندل‌هاست.
+
+<b>۱) کندلی (Candlestick) — پیش‌فرض</b>
+${CHART_HELP.candle}
+هر کندل دقیقاً چهار عدد واقعی همان بازه است: قیمت باز، بیشترین، کمترین و بستهٔ همان بازه.
+مثال: در تایم‌فریم ۱ دقیقه، کندل ساعت ۱۰:۰۰ با اولین قیمت آن دقیقه باز می‌شود و با آخرین قیمت ثانیهٔ ۵۹ بسته می‌شود.
+مناسب وقتی می‌خواهید دقیقاً همان چیزی را ببینید که در بازار افتاده است، مثلاً برای سفارش «به قیمت X رسید».
+
+<b>۲) هایکن‌آشی (Heikin-Ashi)</b>
+${CHART_HELP.heikin_ashi}
+قیمت بستهٔ هر کندل، میانگین چهار قیمت همان بازه است و قیمت باز، میانگین باز و بستهٔ کندل قبلی. یعنی هر کندل کمی از کندل قبلی هم در خودش دارد.
+نتیجه: زنجیرهٔ کندل‌های هم‌رنگ، روند را تمیزتر نشان می‌دهد و نویز کم می‌شود؛ در عوض عددهای روی کندل قیمت واقعی نیستند و تغییر جهت را با کمی تأخیر نشان می‌دهد.
+مناسب وقتی دنبال جهت کلی روند هستید، نه عدد دقیق.
+
+<b>۳) خطی (Line)</b>
+${CHART_HELP.line}
+مناسب یک نگاه سریع به مسیر قیمت.
+
+<b>خلاصه</b>
+عدد دقیق و تصمیم روی قیمت ← کندلی. دیدن روند بدون نویز ← هایکن‌آشی. نگاه ساده ← خطی.
+در دستور تک‌خطی: <code>chart=candle</code> · <code>chart=ha</code> · <code>chart=line</code>
+`.trim();
+
+const TIME_GUIDE = `
+⏱ <b>نوشتن زمان و مدت</b>
+
+هرجا ربات از شما مدت می‌خواهد (مدت معامله، تایم‌فریم، اعتبار سفارش) می‌توانید آزادانه بنویسید.
+
+${TIME_FORMAT_HINT}
+
+<b>نمونه‌های درست</b>
+<code>60</code> ← ۶۰ ثانیه (عدد تنها یعنی ثانیه)
+<code>90s</code> · <code>90 sec</code> · <code>۹۰ ثانیه</code>
+<code>1m</code> · <code>1M</code> · <code>1 min</code> · <code>2 minutes</code> · <code>۲ دقیقه</code>
+<code>1h</code> · <code>2 hours</code> · <code>۲ ساعت</code>
+<code>1h 30m</code> · <code>1H30M</code> · <code>۱ ساعت و ۳۰ دقیقه</code>
+<code>3 days</code> · <code>۳ روز</code> · <code>1 هفته</code> · <code>1 ماه</code>
+
+<b>جاهایی که این قالب کار می‌کند</b>
+• پنل /new: دکمه‌های «مدت» و «اعتبار»
+• دستور تک‌خطی: <code>dur=1m</code> · <code>tf=5m</code> · <code>valid=2h</code>
+• تنظیمات: <code>/set dur 90s</code> · <code>/set tf 1m</code>
+
+در «اعتبار سفارش»، عدد <code>0</code> یعنی سفارش هیچ‌وقت منقضی نشود.
+`.trim();
+
+const TRADE_GUIDE = `
+🎯 <b>ورود، انقضا و اعتبار</b>
+
+<b>نحوهٔ ورود</b> — یعنی بعد از رسیدن قیمت به هدف، معامله دقیقاً کِی باز شود.
+• لحظه‌ای: ${TRIGGER_HELP.touch}
+• کندل بعدی: ${TRIGGER_HELP.next_candle}
+مثال: قیمت هدف <code>1.08540</code> در ثانیهٔ ۲۳ لمس می‌شود. با «لحظه‌ای» همان ثانیهٔ ۲۳ وارد می‌شوید؛ با «کندل بعدی» ربات صبر می‌کند و در ثانیهٔ صفرِ کندل بعد وارد می‌شود.
+
+<b>نوع انقضا</b> — یعنی معامله کِی بسته شود.
+• ثابت: ${EXPIRY_LABEL.fixed} — ${EXPIRY_HELP.fixed}
+• شناور: ${EXPIRY_LABEL.floating} — ${EXPIRY_HELP.floating}
+مثال: تایم‌فریم ۱ دقیقه، انقضای شناور، تعداد کندل ۱ ← اگر در ثانیهٔ ۲۳ وارد شوید، معامله ۳۷ ثانیهٔ بعد و در پایان همان دقیقه بسته می‌شود.
+
+<b>اعتبار سفارش</b> — تا چه مدت منتظر رسیدن قیمت به هدف بمانیم. اگر تا آن زمان قیمت به هدف نرسد، سفارش منقضی می‌شود و هیچ معامله‌ای باز نمی‌شود. <code>0</code> یعنی بدون محدودیت.
+
+<b>حساب</b> — دمو با پول مجازی، ریل با پول واقعی. حساب پیش‌فرض را با /mode عوض کنید.
+`.trim();
+
 const HELP = `
 🤖 <b>ربات معاملات پاکت آپشن</b>
 
@@ -48,6 +150,7 @@ const HELP = `
 /stats: آمار امروز
 /balance: موجودی حساب
 /price &lt;نماد&gt;: قیمت لحظه‌ای
+/symbols &lt;جست‌وجو&gt;: فهرست نمادهای کارگزار
 /status: وضعیت اتصال‌ها
 /mode demo|real: تغییر حساب پیش‌فرض
 /settings: نمایش تنظیمات
@@ -65,6 +168,9 @@ const HELP = `
 <code>exp</code> نوع انقضا: <code>fixed</code> (زمان ثابت) یا <code>float</code> (تا پایان کندل)
 <code>dur</code> مدت ثابت · <code>candles</code> تعداد کندل در حالت شناور
 <code>amount</code> مبلغ · <code>acc</code> حساب · <code>valid</code> اعتبار سفارش
+
+مقدارهای زمانی را آزادانه بنویسید: <code>dur=90</code> · <code>dur=1m</code> · <code>dur="۲ دقیقه"</code> · <code>valid=2h</code>
+برای راهنمای کامل /start را بزنید.
 `.trim();
 
 const SESSION_HELP = `
@@ -91,6 +197,30 @@ const SESSION_HELP = `
 💡 توکن را از تبی بردارید که همان لحظه باز و لاگین است؛ توکنی که چند روز پیش کپی شده تقریباً همیشه باطل است.
 `.trim();
 
+const TOPICS: Record<string, string> = {
+  chart: CHART_GUIDE,
+  time: TIME_GUIDE,
+  trade: TRADE_GUIDE,
+  commands: HELP,
+  session: SESSION_HELP,
+};
+
+function topicsKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('📈 کندلی یا هایکن‌آشی؟', 'h:chart')
+    .row()
+    .text('⏱ نوشتن زمان و مدت', 'h:time')
+    .row()
+    .text('🎯 ورود، انقضا و اعتبار', 'h:trade')
+    .row()
+    .text('🧭 فهرست دستورها', 'h:commands')
+    .text('🔑 ثبت نشست', 'h:session');
+}
+
+function backKeyboard(): InlineKeyboard {
+  return new InlineKeyboard().text('« بازگشت به راهنما', 'h:home');
+}
+
 export async function publishCommands(bot: Bot): Promise<void> {
   try {
     await bot.api.setMyCommands([
@@ -100,6 +230,7 @@ export async function publishCommands(bot: Bot): Promise<void> {
       { command: 'cancel', description: 'لغو سفارش' },
       { command: 'balance', description: 'موجودی حساب' },
       { command: 'price', description: 'قیمت لحظه‌ای نماد' },
+      { command: 'symbols', description: 'فهرست و جست‌وجوی نمادها' },
       { command: 'status', description: 'وضعیت اتصال‌ها' },
       { command: 'history', description: 'آخرین سفارش‌ها' },
       { command: 'stats', description: 'آمار امروز' },
@@ -160,12 +291,8 @@ export function createBot(deps: BotDeps): Bot {
   const balanceSuffix = (mode: AccountMode): number | null =>
     settings.get('notifyBalance') ? engine.cachedBalance(mode) : null;
 
-  const resolveMode = (raw: string | undefined): AccountMode => {
-    const value = raw?.trim().toLowerCase();
-    if (value === 'real' || value === 'live') return 'real';
-    if (value === 'demo' || value === 'practice') return 'demo';
-    return settings.get('defaultAccountMode');
-  };
+  const resolveMode = (raw: string | undefined): AccountMode =>
+    (raw === undefined ? undefined : parseAccountMode(raw)) ?? settings.get('defaultAccountMode');
   const validate = (draft: {
     amount: number;
     expiryMode: ExpiryMode;
@@ -186,6 +313,47 @@ export function createBot(deps: BotDeps): Bot {
       return `مدت معامله نباید بیشتر از ${formatDuration(limits.maxDurationSeconds)} باشد.`;
     }
     return null;
+  };
+
+  const assetLine = (asset: AssetInfo): string =>
+    `<code>${escapeHtml(asset.symbol)}</code> · ${asset.isOpen ? '🟢 باز' : '🔴 بسته'}` +
+    (asset.payout === null ? '' : ` · پرداخت ${asset.payout}٪`) +
+    (asset.name ? ` · ${escapeHtml(asset.name)}` : '');
+
+  const verifySymbol = async (
+    mode: AccountMode,
+    raw: string,
+  ): Promise<{ symbol: string; problem: string | null; note: string | null }> => {
+    const check = await engine.checkSymbol(mode, raw);
+
+    if (check.state === 'unknown') {
+      const list = check.suggestions.map((asset) => `• ${assetLine(asset)}`).join('\n');
+      return {
+        symbol: check.input,
+        problem:
+          `نماد <code>${escapeHtml(check.input)}</code> در فهرست کارگزار نیست.` +
+          (list
+            ? `\n\nشاید یکی از این‌ها باشد:\n${list}`
+            : '\nبا <code>/symbols &lt;بخشی از نام&gt;</code> جست‌وجو کنید.'),
+        note: null,
+      };
+    }
+
+    if (check.state === 'unverified') {
+      return {
+        symbol: check.symbol,
+        problem: null,
+        note: '⚠️ فهرست نمادها از کارگزار گرفته نشد، بدون بررسی ادامه می‌دهیم.',
+      };
+    }
+
+    const notes: string[] = [];
+    if (check.corrected) notes.push(`✅ نماد اصلاح شد به ${assetLine(check.asset)}`);
+    if (!check.asset.isOpen) {
+      notes.push('🔴 بازار این نماد الان بسته است؛ سفارش تا باز شدن بازار منتظر می‌ماند.');
+      if (check.twin?.isOpen) notes.push(`نسخهٔ باز: ${assetLine(check.twin)}`);
+    }
+    return { symbol: check.symbol, problem: null, note: notes.length > 0 ? notes.join('\n') : null };
   };
 
   const submitOrder = async (
@@ -223,13 +391,21 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
 
-    const notice = await ctx.reply('⏳ در حال اتصال به نماد و ثبت سفارش…');
+    const notice = await ctx.reply('⏳ در حال بررسی نماد و ثبت سفارش…');
+
+    const verdict = await verifySymbol(input.accountMode, input.symbol);
+    if (verdict.problem !== null) {
+      await ctx.api
+        .editMessageText(chatId, notice.message_id, `⚠️ ${verdict.problem}`, { parse_mode: 'HTML' })
+        .catch((error: unknown) => logger.debug('could not edit the notice message', error));
+      return;
+    }
 
     try {
       const order = await engine.createOrder({
         chatId,
         accountMode: input.accountMode,
-        symbol: input.symbol,
+        symbol: verdict.symbol,
         direction: input.direction,
         triggerPrice: input.triggerPrice,
         triggerMode: input.triggerMode,
@@ -244,6 +420,7 @@ export function createBot(deps: BotDeps): Bot {
 
       const text = withBalance(
         `✅ <b>سفارش ثبت شد</b>\n\n${renderOrder(order, config.timezone)}\n\n` +
+          (verdict.note === null ? '' : `${verdict.note}\n\n`) +
           `از این لحظه قیمت لحظه‌ای <b>${escapeHtml(order.symbol)}</b> زنده دنبال می‌شود.`,
         balanceSuffix(order.accountMode),
         settings.get('notifyBalance'),
@@ -273,26 +450,47 @@ export function createBot(deps: BotDeps): Bot {
     }
   };
 
-  const wizard = new OrderWizard(settings, async (draft: OrderDraft, ctx: Context) => {
-    if (draft.symbol === null || draft.triggerPrice === null) return;
-    await submitOrder(ctx, {
-      symbol: draft.symbol,
-      direction: draft.direction,
-      triggerPrice: draft.triggerPrice,
-      triggerMode: draft.triggerMode,
-      timeframeSeconds: draft.timeframeSeconds,
-      chartType: draft.chartType,
-      expiryMode: draft.expiryMode,
-      durationSeconds: draft.durationSeconds,
-      candleCount: draft.candleCount,
-      amount: draft.amount,
-      accountMode: draft.accountMode,
-      validForSeconds: draft.validForSeconds,
+  const wizard = new OrderWizard(
+    settings,
+    async (draft: OrderDraft, ctx: Context) => {
+      if (draft.symbol === null || draft.triggerPrice === null) return;
+      await submitOrder(ctx, {
+        symbol: draft.symbol,
+        direction: draft.direction,
+        triggerPrice: draft.triggerPrice,
+        triggerMode: draft.triggerMode,
+        timeframeSeconds: draft.timeframeSeconds,
+        chartType: draft.chartType,
+        expiryMode: draft.expiryMode,
+        durationSeconds: draft.durationSeconds,
+        candleCount: draft.candleCount,
+        amount: draft.amount,
+        accountMode: draft.accountMode,
+        validForSeconds: draft.validForSeconds,
+      });
+    },
+    verifySymbol,
+  );
+
+  bot.on('message:text', async (ctx, next) => {
+    if (ctx.message.text.startsWith('/')) await wizard.abortPrompt(ctx);
+    await next();
+  });
+
+  bot.command('start', async (ctx) => {
+    await ctx.reply(GUIDE, {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      reply_markup: topicsKeyboard(),
     });
   });
 
-  bot.command(['start', 'help'], async (ctx) => {
-    await ctx.reply(HELP, { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
+  bot.command('help', async (ctx) => {
+    await ctx.reply(HELP, {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      reply_markup: topicsKeyboard(),
+    });
   });
 
   bot.command('id', async (ctx) => {
@@ -417,10 +615,20 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.reply('نماد را بدهید. مثال: <code>/price GBPAUD_otc</code>', { parse_mode: 'HTML' });
       return;
     }
-    const symbol = normalizeSymbol(symbolRaw);
     const mode = resolveMode(modeRaw);
-    const notice = await ctx.reply(`⏳ در حال گرفتن قیمت ${escapeHtml(symbol)}…`, { parse_mode: 'HTML' });
+    const notice = await ctx.reply(
+      `⏳ در حال بررسی ${escapeHtml(normalizeSymbol(symbolRaw))}…`,
+      { parse_mode: 'HTML' },
+    );
     try {
+      const verdict = await verifySymbol(mode, symbolRaw);
+      if (verdict.problem !== null) {
+        await ctx.api.editMessageText(ctx.chat.id, notice.message_id, `⚠️ ${verdict.problem}`, {
+          parse_mode: 'HTML',
+        });
+        return;
+      }
+      const symbol = verdict.symbol;
       const price = await engine.price(mode, symbol);
       await ctx.api.editMessageText(
         ctx.chat.id,
@@ -430,6 +638,53 @@ export function createBot(deps: BotDeps): Bot {
           : `💹 <b>${escapeHtml(symbol)}</b> (${ACCOUNT_LABEL[mode]}): <code>${formatPrice(price)}</code>`,
         { parse_mode: 'HTML' },
       );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await ctx.api
+        .editMessageText(ctx.chat.id, notice.message_id, `⚠️ ${escapeHtml(message)}`, { parse_mode: 'HTML' })
+        .catch((error: unknown) => logger.debug('could not edit the notice message', error));
+    }
+  });
+
+  bot.command('symbols', async (ctx) => {
+    const query = ctx.match.trim();
+    const mode = settings.get('defaultAccountMode');
+    const notice = await ctx.reply('⏳ در حال گرفتن فهرست نمادها…');
+    try {
+      const assets = await engine.assets(mode);
+      if (assets.length === 0) {
+        await ctx.api.editMessageText(ctx.chat.id, notice.message_id, '⚠️ کارگزار فهرست نمادها را نفرستاد.');
+        return;
+      }
+
+      const needle = normalizeSymbol(query).replace(/_OTC$/i, '').replace(/^#/, '');
+      const matched = (
+        needle === ''
+          ? assets.filter((asset) => asset.isOpen)
+          : assets.filter(
+              (asset) =>
+                asset.symbol.toUpperCase().includes(needle) ||
+                asset.name.toUpperCase().includes(query.toUpperCase()),
+            )
+      )
+        .slice()
+        .sort((a, b) => (a.isOpen === b.isOpen ? (b.payout ?? 0) - (a.payout ?? 0) : a.isOpen ? -1 : 1));
+
+      const shown = matched.slice(0, 30);
+      const header =
+        needle === ''
+          ? `نمادهای باز حساب ${ACCOUNT_LABEL[mode]} (${matched.length} مورد)`
+          : `نتیجهٔ جست‌وجوی <code>${escapeHtml(query)}</code> (${matched.length} مورد)`;
+      const body =
+        shown.length === 0
+          ? 'چیزی پیدا نشد.'
+          : shown.map((asset) => `• ${assetLine(asset)}`).join('\n') +
+            (matched.length > shown.length ? `\n\n… و ${matched.length - shown.length} مورد دیگر.` : '');
+
+      await ctx.api.editMessageText(ctx.chat.id, notice.message_id, `📋 <b>${header}</b>\n\n${body}`, {
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await ctx.api
@@ -463,7 +718,7 @@ export function createBot(deps: BotDeps): Bot {
   });
 
   bot.command('mode', async (ctx) => {
-    const raw = ctx.match.trim().toLowerCase();
+    const raw = ctx.match.trim();
     if (raw === '') {
       await ctx.reply(
         `حساب پیش‌فرض فعلی: ${ACCOUNT_LABEL[settings.get('defaultAccountMode')]}\n` +
@@ -472,15 +727,16 @@ export function createBot(deps: BotDeps): Bot {
       );
       return;
     }
-    if (raw !== 'demo' && raw !== 'real') {
+    const mode = parseAccountMode(raw);
+    if (mode === undefined) {
       await ctx.reply('فقط <code>demo</code> یا <code>real</code>.', { parse_mode: 'HTML' });
       return;
     }
-    settings.set('defaultAccountMode', raw);
-    const warning = engine.hasCredentials(raw)
+    settings.set('defaultAccountMode', mode);
+    const warning = engine.hasCredentials(mode)
       ? ''
-      : `\n\n⚠️ هنوز برای این حساب نشستی ثبت نشده: <code>/session ${raw} &lt;SSID&gt;</code>`;
-    await ctx.reply(`حساب پیش‌فرض روی ${ACCOUNT_LABEL[raw]} تنظیم شد.${warning}`, { parse_mode: 'HTML' });
+      : `\n\n⚠️ هنوز برای این حساب نشستی ثبت نشده: <code>/session ${mode} &lt;SSID&gt;</code>`;
+    await ctx.reply(`حساب پیش‌فرض روی ${ACCOUNT_LABEL[mode]} تنظیم شد.${warning}`, { parse_mode: 'HTML' });
   });
 
   bot.command('settings', async (ctx) => {
@@ -520,8 +776,8 @@ export function createBot(deps: BotDeps): Bot {
     switch (key.toLowerCase()) {
       case 'mode':
       case 'account': {
-        const mode = value.toLowerCase();
-        if (mode !== 'demo' && mode !== 'real') return fail('فقط demo یا real.');
+        const mode = parseAccountMode(value);
+        if (mode === undefined) return fail('فقط demo یا real.');
         settings.set('defaultAccountMode', mode);
         break;
       }
@@ -534,14 +790,14 @@ export function createBot(deps: BotDeps): Bot {
       case 'tf':
       case 'timeframe': {
         const seconds = parseDuration(value);
-        if (seconds === null) return fail('تایم‌فریم نامعتبر.');
+        if (seconds === null) return fail(`تایم‌فریم نامعتبر.\n\n${TIME_FORMAT_HINT}`);
         settings.set('defaultTimeframeSeconds', seconds);
         break;
       }
       case 'dur':
       case 'duration': {
         const seconds = parseDuration(value);
-        if (seconds === null) return fail('مدت نامعتبر.');
+        if (seconds === null) return fail(`مدت نامعتبر.\n\n${TIME_FORMAT_HINT}`);
         settings.set('defaultDurationSeconds', seconds);
         break;
       }
@@ -552,34 +808,26 @@ export function createBot(deps: BotDeps): Bot {
         break;
       }
       case 'chart': {
-        const map: Record<string, ChartType> = {
-          candle: 'candle',
-          ha: 'heikin_ashi',
-          heikin_ashi: 'heikin_ashi',
-          line: 'line',
-        };
-        const chart = map[value.toLowerCase()];
-        if (!chart) return fail('نوع چارت نامعتبر (candle / ha / line).');
+        const chart = parseChartType(value);
+        if (chart === undefined) return fail('نوع چارت نامعتبر (candle / ha / line).');
         settings.set('defaultChartType', chart);
         break;
       }
       case 'entry': {
-        const map: Record<string, TriggerMode> = { touch: 'touch', next: 'next_candle', next_candle: 'next_candle' };
-        const mode = map[value.toLowerCase()];
-        if (!mode) return fail('نحوهٔ ورود نامعتبر (touch / next).');
+        const mode = parseTriggerMode(value);
+        if (mode === undefined) return fail('نحوهٔ ورود نامعتبر (touch / next).');
         settings.set('defaultTriggerMode', mode);
         break;
       }
       case 'expiry': {
-        const map: Record<string, ExpiryMode> = { fixed: 'fixed', float: 'floating', floating: 'floating' };
-        const mode = map[value.toLowerCase()];
-        if (!mode) return fail('نوع انقضا نامعتبر (fixed / float).');
+        const mode = parseExpiryMode(value);
+        if (mode === undefined) return fail('نوع انقضا نامعتبر (fixed / float).');
         settings.set('defaultExpiryMode', mode);
         break;
       }
       case 'balance': {
-        const on = ['on', 'true', '1', 'yes', 'روشن'].includes(value.toLowerCase());
-        const off = ['off', 'false', '0', 'no', 'خاموش'].includes(value.toLowerCase());
+        const on = ['on', 'true', '1', 'yes', 'روشن', 'بله'].includes(value.toLowerCase());
+        const off = ['off', 'false', '0', 'no', 'خاموش', 'نه'].includes(value.toLowerCase());
         if (!on && !off) return fail('فقط on یا off.');
         settings.set('notifyBalance', on);
         break;
@@ -649,6 +897,24 @@ export function createBot(deps: BotDeps): Bot {
       return;
     }
 
+    if (data.startsWith('h:')) {
+      const topic = data.slice(2);
+      const text = topic === 'home' ? GUIDE : TOPICS[topic];
+      if (text === undefined) {
+        await ctx.answerCallbackQuery();
+        return;
+      }
+      await ctx.answerCallbackQuery();
+      await ctx
+        .editMessageText(text, {
+          parse_mode: 'HTML',
+          link_preview_options: { is_disabled: true },
+          reply_markup: topic === 'home' ? topicsKeyboard() : backKeyboard(),
+        })
+        .catch((error: unknown) => logger.debug('could not switch the guide page', error));
+      return;
+    }
+
     if (data.startsWith('c:')) {
       const id = data.slice(2);
       const order = orders.get(id);
@@ -665,9 +931,12 @@ export function createBot(deps: BotDeps): Bot {
             : 'این سفارش دیگر فعال نیست.',
         show_alert: !result.ok,
       });
-      if (result.ok) await ctx
-        .editMessageReplyMarkup({ reply_markup: undefined })
-        .catch((error: unknown) => logger.debug('could not clear the cancel button', error));
+      // The button is dead once the order left the cancellable states, so take it away.
+      if (result.ok || result.reason === 'not_active' || result.reason === 'not_found') {
+        await ctx
+          .editMessageReplyMarkup({ reply_markup: undefined })
+          .catch((error: unknown) => logger.debug('could not clear the cancel button', error));
+      }
       return;
     }
 

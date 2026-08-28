@@ -214,6 +214,50 @@ pending ──price touches trigger──┬─ touch mode ───────
 
 ---
 
+## Running with Docker
+
+The image is Bun on Alpine, runs as a non-root user, and keeps a read only root
+filesystem. Only `./data` is writable, which is where the SQLite database lives.
+
+```bash
+cp .env.example .env          # then fill in the token and the SSID
+echo "DOCKER_UID=$(id -u)" >> .env
+echo "DOCKER_GID=$(id -g)" >> .env
+docker compose up -d
+docker compose logs -f
+```
+
+The database is a bind mount, not a Docker volume: `./data` on the host is
+mounted at `/app/data` in the container, so `data/bot.sqlite` stays in the
+project directory where you can read, copy and back it up normally. Point
+`DATA_DIR` in `.env` somewhere else if you want it in another path.
+
+`DOCKER_UID` / `DOCKER_GID` must match the owner of `./data` on the host,
+otherwise the container cannot write the database. The entrypoint checks this
+before startup and tells you what to fix instead of failing later on a write.
+The mount is declared with `create_host_path: false`, so a missing `./data`
+stops compose with a clear message rather than creating a root owned directory.
+
+The container writes a heartbeat file every 30 seconds and the healthcheck marks
+it unhealthy once that file is older than two minutes, so a process that is
+technically alive but no longer working shows up in `docker ps` as unhealthy.
+With `restart: unless-stopped` the bot comes back after a crash or a reboot, and
+pending orders are re-attached from SQLite on startup.
+
+Useful commands:
+
+```bash
+docker compose ps                        # health status
+docker compose restart bot               # after changing .env
+docker compose up -d --build             # after changing the code
+cp data/bot.sqlite backup-$(date +%F).sqlite   # back up orders and settings
+```
+
+Stopping is graceful: `docker compose stop` sends SIGTERM, the bot stops polling,
+closes the broker sockets and the database, and exits within the 20 second grace
+period. Open trades keep running at the broker and are reconciled on the next
+start.
+
 ## Configuration
 
 Everything is optional except `TELEGRAM_BOT_TOKEN`. See `.env.example` for the full list; the

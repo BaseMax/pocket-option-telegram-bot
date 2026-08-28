@@ -22,6 +22,7 @@ const schema = z.object({
   PO_SERVER_TIME_OFFSET: numeric(7200),
 
   DB_PATH: z.string().optional().default('./data/bot.sqlite'),
+  HEARTBEAT_PATH: z.string().optional().default('./data/heartbeat'),
   DISPLAY_TIMEZONE: z.string().optional().default('Asia/Tehran'),
 
   DEFAULT_AMOUNT: numeric(1),
@@ -51,6 +52,7 @@ export interface AppConfig {
     serverTimeOffset: number;
   };
   dbPath: string;
+  heartbeatPath: string;
   timezone: string;
   defaults: {
     amount: number;
@@ -101,6 +103,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       serverTimeOffset: c.PO_SERVER_TIME_OFFSET,
     },
     dbPath: c.DB_PATH,
+    heartbeatPath: c.HEARTBEAT_PATH,
     timezone: c.DISPLAY_TIMEZONE,
     defaults: {
       amount: c.DEFAULT_AMOUNT,

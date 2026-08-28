@@ -46,6 +46,25 @@ export const CHART_LABEL: Record<ChartType, string> = {
   line: 'خطی',
 };
 
+/** One-line answers to "این گزینه چه می‌کند؟" shown next to each choice in the wizard. */
+export const CHART_HELP: Record<ChartType, string> = {
+  candle:
+    'کندل استاندارد (ژاپنی): هر کندل دقیقاً قیمت باز، بسته، بیشترین و کمترین همان بازه را نشان می‌دهد. قیمت واقعی بازار، بدون هیچ فیلتری.',
+  heikin_ashi:
+    'هایکن‌آشی: کندل‌ها از میانگین قیمت‌ها ساخته می‌شوند، پس نوسان‌های ریز حذف و روند صاف‌تر دیده می‌شود؛ اما قیمت روی کندل، قیمت واقعی معامله نیست و کمی با تأخیر می‌آید.',
+  line: 'خطی: فقط قیمت بستهٔ هر بازه به هم وصل می‌شود؛ ساده‌ترین نما برای دیدن مسیر کلی قیمت.',
+};
+
+export const TRIGGER_HELP: Record<TriggerMode, string> = {
+  touch: 'همان ثانیه‌ای که قیمت به عدد هدف برسد، معامله باز می‌شود.',
+  next_candle: 'بعد از برخورد قیمت صبر می‌کند و معامله را دقیقاً در اولین لحظهٔ کندل بعدی باز می‌کند.',
+};
+
+export const EXPIRY_HELP: Record<ExpiryMode, string> = {
+  fixed: 'معامله به اندازهٔ مدتی که خودتان می‌دهید باز می‌ماند (مثلاً ۶۰ ثانیه).',
+  floating: 'معامله تا پایان کندل جاری باز می‌ماند؛ اگر تعداد کندل بیشتر بدهید، تا پایان همان تعداد کندل.',
+};
+
 export const ACCOUNT_LABEL: Record<AccountMode, string> = {
   demo: '🧪 دمو',
   real: '💰 ریل',

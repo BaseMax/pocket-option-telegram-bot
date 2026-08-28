@@ -35,6 +35,28 @@ describe('parseNumber', () => {
 });
 
 describe('parseOrderCommand', () => {
+  it('accepts Persian words and mixed case for the choice parameters', () => {
+    const result = parseOrderCommand('EURUSD فروش ۱٫۰۸۵۴ dur=۲دقیقه acc=واقعی chart=هایکن entry=بعدی exp=شناور', defaults);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.order.direction).toBe('put');
+    expect(result.order.triggerPrice).toBeCloseTo(1.0854, 6);
+    expect(result.order.durationSeconds).toBe(120);
+    expect(result.order.accountMode).toBe('real');
+    expect(result.order.chartType).toBe('heikin_ashi');
+    expect(result.order.triggerMode).toBe('next_candle');
+    expect(result.order.expiryMode).toBe('floating');
+  });
+
+  it('accepts long unit names and upper case in the time parameters', () => {
+    const result = parseOrderCommand('EURUSD BUY 1.08 TF=5MIN DUR=2Hours VALID=1DAY', defaults);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.order.timeframeSeconds).toBe(300);
+    expect(result.order.durationSeconds).toBe(7200);
+    expect(result.order.validForSeconds).toBe(86400);
+  });
+
   it('fills every field from the defaults', () => {
     const result = parseOrderCommand('gbpaud_otc buy 1.9532', defaults);
     expect(result.ok).toBe(true);

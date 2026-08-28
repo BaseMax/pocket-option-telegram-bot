@@ -6,7 +6,7 @@ import { parseSsid, type AuthPayload } from '../util/ssid.ts';
 import type { AppConfig } from '../config.ts';
 import type { SettingsStore } from '../storage/settings.ts';
 import type { AccountMode, Candle, Tick } from '../types.ts';
-import type { ClosedDeal, OpenOrderAck } from '../pocket/protocol.ts';
+import type { AssetInfo, ClosedDeal, OpenOrderAck } from '../pocket/protocol.ts';
 
 export class MissingCredentialsError extends Error {
   readonly mode: AccountMode;
@@ -22,6 +22,7 @@ interface SessionEvents extends Record<string, readonly unknown[]> {
   disconnected: [string];
   balance: [number];
   dealClosed: [ClosedDeal];
+  assets: [AssetInfo[]];
   orderAccepted: [OpenOrderAck];
   authFailed: [string];
 }
@@ -65,6 +66,7 @@ export class Session extends Emitter<SessionEvents> {
     });
     this.client.on('authFailed', (reason) => this.emit('authFailed', reason));
     this.client.on('balance', (balance) => this.emit('balance', balance));
+    this.client.on('assets', (assets) => this.emit('assets', assets));
     this.client.on('dealClosed', (deal) => this.emit('dealClosed', deal));
     this.client.on('orderAccepted', (ack) => this.emit('orderAccepted', ack));
     this.client.on('history', ({ symbol, ticks }) => {
@@ -108,6 +110,10 @@ export class Session extends Emitter<SessionEvents> {
 
   get isAuthRejected(): boolean {
     return this.client.isAuthRejected;
+  }
+
+  get assets(): readonly AssetInfo[] {
+    return this.client.assets;
   }
 
   get balance(): number | null {

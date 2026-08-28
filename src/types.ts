@@ -33,6 +33,25 @@ export const TERMINAL_STATUSES: readonly OrderStatus[] = [
   'expired',
 ];
 
+/**
+ * What the user asked for, before the engine turns it into a stored Order.
+ * The one-line command, the wizard panel and the order submitter all speak this shape.
+ */
+export interface OrderSpec {
+  symbol: string;
+  direction: Direction;
+  triggerPrice: number;
+  triggerMode: TriggerMode;
+  timeframeSeconds: number;
+  chartType: ChartType;
+  expiryMode: ExpiryMode;
+  durationSeconds: number;
+  candleCount: number;
+  amount: number;
+  accountMode: AccountMode;
+  validForSeconds: number | null;
+}
+
 export interface Order {
   id: string;
   chatId: number;

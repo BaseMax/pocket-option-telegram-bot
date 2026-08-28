@@ -2,11 +2,12 @@ import { createLogger } from '../logger.ts';
 import { SessionManager, MissingCredentialsError, type Session } from './session.ts';
 import { isTouched, resolveApproachSide } from './trigger.ts';
 import { candleOpenTime, nowSeconds, nthCandleCloseTime } from '../util/time.ts';
+import { normalizeSymbol, resolveSymbol } from '../pocket/symbols.ts';
 import type { AppConfig } from '../config.ts';
 import type { OrderRepository } from '../storage/orders.ts';
 import type { SettingsStore } from '../storage/settings.ts';
 import type { AccountMode, NewOrder, Order } from '../types.ts';
-import type { ClosedDeal, OpenOrderAck } from '../pocket/protocol.ts';
+import type { AssetInfo, ClosedDeal, OpenOrderAck } from '../pocket/protocol.ts';
 
 export type EngineEvent =
   | { type: 'triggered'; order: Order; price: number }
@@ -19,6 +20,11 @@ export type EngineEvent =
   | { type: 'settlement_pending'; order: Order }
   | { type: 'session'; mode: AccountMode; symbol: string | null; state: 'up' | 'down'; detail?: string }
   | { type: 'auth_failed'; mode: AccountMode; detail: string };
+
+export type SymbolCheck =
+  | { state: 'ok'; symbol: string; asset: AssetInfo; twin: AssetInfo | null; corrected: boolean }
+  | { state: 'unknown'; input: string; suggestions: AssetInfo[] }
+  | { state: 'unverified'; symbol: string; reason: string };
 
 export type EngineEventHandler = (event: EngineEvent) => void;
 
@@ -132,6 +138,59 @@ export class TradeEngine {
       this.sessions.release(mode, null, holder);
     }
   }
+  async assets(mode: AccountMode, timeoutMs = 20_000): Promise<readonly AssetInfo[]> {
+    const live = this.sessions
+      .list()
+      .map((entry) => entry.session)
+      .find((session) => session.mode === mode && session.assets.length > 0);
+    if (live) return live.assets;
+
+    const holder = `assets:${Date.now()}`;
+    const session = this.sessions.acquire(mode, null, holder);
+    try {
+      await session.client.waitUntilReady(timeoutMs);
+      if (session.assets.length > 0) return session.assets;
+      return await new Promise<readonly AssetInfo[]>((resolve) => {
+        const timer = setTimeout(() => {
+          off();
+          resolve(session.assets);
+        }, 8_000);
+        const off = session.on('assets', (list) => {
+          clearTimeout(timer);
+          off();
+          resolve(list);
+        });
+      });
+    } finally {
+      this.sessions.release(mode, null, holder);
+    }
+  }
+
+  async checkSymbol(mode: AccountMode, raw: string): Promise<SymbolCheck> {
+    const symbol = normalizeSymbol(raw);
+    try {
+      const assets = await this.assets(mode);
+      if (assets.length === 0) {
+        return { state: 'unverified', symbol, reason: 'the broker sent no asset list' };
+      }
+      const match = resolveSymbol(raw, assets);
+      if (match.status === 'unknown') {
+        return { state: 'unknown', input: match.input, suggestions: match.suggestions };
+      }
+      return {
+        state: 'ok',
+        symbol: match.asset!.symbol,
+        asset: match.asset!,
+        twin: match.twin,
+        corrected: match.status === 'corrected',
+      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`could not verify ${symbol} against the broker asset list`, error);
+      return { state: 'unverified', symbol, reason };
+    }
+  }
+
   async price(mode: AccountMode, symbol: string, timeoutMs = 20_000): Promise<number | null> {
     const existing = this.sessions.get(mode, symbol);
     if (existing?.price !== null && existing?.price !== undefined) return existing.price;
