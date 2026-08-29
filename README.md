@@ -321,19 +321,22 @@ notable ones:
 
 ```bash
 bun run dev         # watch mode
-bun test            # 79 tests, no network access required
+bun run check       # typecheck, then the full test suite
+bun test            # tests only, no network access required
 bun run typecheck   # tsc --noEmit
 ```
 
 The engine takes its `SessionManager` by injection, so the whole order state machine
 (triggering, arming, expiry arithmetic, settlement) is tested against a fake broker with no
 sockets involved. The Telegram layer is tested by feeding synthetic updates through grammY and
-capturing the outgoing API calls.
+capturing the outgoing API calls; `tests/harness.ts` builds that fake bot, `tests/fakes.ts` the
+fake broker and the order fixtures.
+
+`tsconfig.json` fails the build on unused locals and parameters, so dead code cannot accumulate
+quietly.
 
 ## Notes and limits
 
-- `old.js` is the original single-strategy prototype this project replaced. It is kept for
-  reference only and is not used at runtime.
 - Pocket Option publishes no API contract. Every frame parser here is defensive, and the client
   treats account-scoped data (a balance push) as proof of authentication so a renamed success event
   cannot strand it. A broker-side change can still break things; `/status` and the connection
