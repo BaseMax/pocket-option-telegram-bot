@@ -61,15 +61,6 @@ TELEGRAM_ADMIN_IDS=              # leave empty; the first /start claims the bot
 
 Then in Telegram: `/start`, and give the bot a broker session with `/session demo <SSID>`.
 
-### راه‌اندازی سریع (فارسی)
-
-۱. `bun install` را بزنید.
-۲. فایل `.env.example` را به `.env` کپی کنید و `TELEGRAM_BOT_TOKEN` را بگذارید.
-۳. `bun start` را اجرا کنید.
-۴. در تلگرام `/start` بزنید، اولین چت مالک ربات می‌شود.
-۵. با `/session demo <SSID>` نشست پاکت آپشن را ثبت کنید (راهنمای گرفتن SSID را با دستور `/session` ببینید).
-۶. با `/new` سفارش بسازید یا از دستور تک‌خطی `/order` استفاده کنید.
-
 ---
 
 ## Getting your Pocket Option SSID
