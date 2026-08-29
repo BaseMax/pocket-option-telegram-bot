@@ -38,8 +38,6 @@ const schema = z.object({
   MAX_TICK_GAP_SECONDS: numeric(30),
 });
 
-export type ChartTypeName = ChartType;
-
 export interface AppConfig {
   telegram: {
     token: string;
@@ -74,6 +72,12 @@ export interface AppConfig {
   };
 }
 
+/** The endpoints for one account: whatever the env names, else the built-in list. */
+function serversFor(mode: AccountMode, override: string | undefined): readonly ServerEndpoint[] {
+  const parsed = parseServerList(override);
+  return parsed.length > 0 ? parsed : defaultServers(mode);
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = schema.safeParse(env);
   if (!parsed.success) {
@@ -88,17 +92,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     .map(Number)
     .filter((n) => Number.isInteger(n));
 
-  const demoOverride = parseServerList(c.PO_DEMO_SERVERS);
-  const realOverride = parseServerList(c.PO_REAL_SERVERS);
-
   return {
     telegram: { token: c.TELEGRAM_BOT_TOKEN, adminIds },
     pocket: {
       ssid: { demo: c.PO_DEMO_SSID.trim(), real: c.PO_REAL_SSID.trim() },
       uid: { demo: c.PO_DEMO_UID, real: c.PO_REAL_UID },
       servers: {
-        demo: demoOverride.length > 0 ? demoOverride : defaultServers('demo'),
-        real: realOverride.length > 0 ? realOverride : defaultServers('real'),
+        demo: serversFor('demo', c.PO_DEMO_SERVERS),
+        real: serversFor('real', c.PO_REAL_SERVERS),
       },
       serverTimeOffset: c.PO_SERVER_TIME_OFFSET,
     },

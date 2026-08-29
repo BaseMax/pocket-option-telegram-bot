@@ -1,43 +1,36 @@
-# dependencies (bun install)
+# dependencies
 node_modules
 
-# output
+# build output
 out
 dist
 *.tgz
 
-# code coverage
+# test coverage
 coverage
 *.lcov
 
-# logs
+# logs and crash reports
 logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
-# dotenv environment variable files
-.env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-
-# caches
-.eslintcache
-.cache
-*.tsbuildinfo
-
-# IntelliJ based IDEs
-.idea
-
-# Finder (MacOS) folder config
-.DS_Store
-
-# Project
+# secrets: the token and the broker session live here
 .env
 .env.local
+.env.*.local
+
+# the SQLite database and its write-ahead log
 data/*
 !data/.gitkeep
 *.sqlite
-*.sqlite-wal
 *.sqlite-shm
+*.sqlite-wal
+
+# caches
+.cache
+*.tsbuildinfo
+
+# editors and OS
+.idea
+.DS_Store

@@ -127,10 +127,12 @@ Telegram take precedence and persist in the database.
 | `/stats` | Wins / losses / net P&L over the last 24h |
 | `/balance [demo\|real]` | Account balance |
 | `/price <symbol>` | Live price |
+| `/symbols [query]` | Broker symbol list, or a search through it |
 | `/status` | Session health, endpoints, broker clock offset |
 | `/mode demo\|real` | Default account |
 | `/settings`, `/set <key> <value>` | Defaults for new orders |
 | `/session demo\|real <SSID>` | Store and test broker credentials |
+| `/start`, `/help` | The guide, with pages on charts, time formats and entry rules |
 | `/id` | Your chat id |
 
 ### One-line order syntax
@@ -156,7 +158,10 @@ Telegram take precedence and persist in the database.
 | `acc` | `demo`, `real` | `/mode` |
 | `valid` | `30m`, abandon if never triggered | none |
 
-Persian direction words (`خرید` / `فروش`) and Persian digits are accepted.
+Every value is read leniently. Durations accept any unit spelling in either language and any
+case: `90`, `1m`, `1M`, `2 minutes`, `۳۰ دقیقه`, `1h 30m`, `2 ساعت و ۱۵ دقیقه`, `3 days`, `1 ماه`
+(a bare number means seconds). Direction, account, chart and entry words accept their Persian
+equivalents too (`خرید` / `فروش`, `واقعی`, `هایکن`, `بعدی`), and Persian digits work everywhere.
 
 ---
 
@@ -222,6 +227,7 @@ src/
   util/
     time.ts             duration parsing/formatting and candle boundaries
     async.ts            waiting for the first value a subscription delivers
+    values.ts           coercions for data that arrives from outside the process
     ssid.ts             SSID payload parsing
     errors.ts           one readable message out of anything thrown
     emitter.ts          tiny typed event emitter

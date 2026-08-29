@@ -1,4 +1,5 @@
 import { createLogger } from '../logger.ts';
+import { asNumber, asRecord, asString } from '../util/values.ts';
 import type { Tick } from '../types.ts';
 
 const logger = createLogger('protocol');
@@ -85,31 +86,14 @@ export function decodeFrame(arg: unknown): unknown {
   return arg ?? null;
 }
 
-function num(value: unknown): number | null {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function str(value: unknown): string | null {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number') return String(value);
-  return null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 export function parseTicks(frame: unknown): Tick[] {
   if (!Array.isArray(frame)) return [];
   const out: Tick[] = [];
   for (const entry of frame) {
     if (!Array.isArray(entry) || entry.length < 3) continue;
-    const symbol = str(entry[0]);
-    const time = num(entry[1]);
-    const price = num(entry[2]);
+    const symbol = asString(entry[0]);
+    const time = asNumber(entry[1]);
+    const price = asNumber(entry[2]);
     if (symbol === null || time === null || price === null) continue;
     out.push({ symbol, time, price });
   }
@@ -119,23 +103,23 @@ export function parseTicks(frame: unknown): Tick[] {
 export function parseHistory(frame: unknown): { symbol: string; period: number; ticks: Tick[] } | null {
   const obj = asRecord(frame);
   if (!obj) return null;
-  const symbol = str(obj['asset']);
+  const symbol = asString(obj['asset']);
   if (symbol === null) return null;
-  const period = num(obj['period']) ?? 0;
+  const period = asNumber(obj['period']) ?? 0;
   const raw = obj['history'] ?? obj['data'];
   const ticks: Tick[] = [];
   if (Array.isArray(raw)) {
     for (const entry of raw) {
       if (Array.isArray(entry) && entry.length >= 2) {
-        const time = num(entry[0]);
-        const price = num(entry[1]);
+        const time = asNumber(entry[0]);
+        const price = asNumber(entry[1]);
         if (time !== null && price !== null) ticks.push({ symbol, time, price });
         continue;
       }
       const point = asRecord(entry);
       if (point) {
-        const time = num(point['time']);
-        const price = num(point['price'] ?? point['close']);
+        const time = asNumber(point['time']);
+        const price = asNumber(point['price'] ?? point['close']);
         if (time !== null && price !== null) ticks.push({ symbol, time, price });
       }
     }
@@ -146,23 +130,23 @@ export function parseHistory(frame: unknown): { symbol: string; period: number; 
 
 export function parseBalance(frame: unknown): number | null {
   const obj = asRecord(frame);
-  if (!obj) return num(frame);
-  return num(obj['balance']);
+  if (!obj) return asNumber(frame);
+  return asNumber(obj['balance']);
 }
 
 export function parseOpenOrderAck(frame: unknown): OpenOrderAck | null {
   const obj = asRecord(frame);
   if (!obj) return null;
-  const dealId = str(obj['id']);
+  const dealId = asString(obj['id']);
   if (dealId === null) return null;
   return {
     dealId,
-    requestId: num(obj['requestId']),
-    asset: str(obj['asset']),
-    amount: num(obj['amount']),
-    openPrice: num(obj['openPrice']),
-    openTimestamp: num(obj['openTimestamp'] ?? obj['openTime']),
-    closeTimestamp: num(obj['closeTimestamp'] ?? obj['closeTime']),
+    requestId: asNumber(obj['requestId']),
+    asset: asString(obj['asset']),
+    amount: asNumber(obj['amount']),
+    openPrice: asNumber(obj['openPrice']),
+    openTimestamp: asNumber(obj['openTimestamp'] ?? obj['openTime']),
+    closeTimestamp: asNumber(obj['closeTimestamp'] ?? obj['closeTime']),
     raw: frame,
   };
 }
@@ -171,23 +155,23 @@ export function parseOpenOrderFailure(frame: unknown): { requestId: number | nul
   const obj = asRecord(frame);
   if (!obj) return { requestId: null, error: typeof frame === 'string' ? frame : 'unknown error' };
   const message =
-    str(obj['error']) ?? str(obj['message']) ?? str(obj['reason']) ?? JSON.stringify(frame);
-  return { requestId: num(obj['requestId']), error: message };
+    asString(obj['error']) ?? asString(obj['message']) ?? asString(obj['reason']) ?? JSON.stringify(frame);
+  return { requestId: asNumber(obj['requestId']), error: message };
 }
 
 function parseDeal(entry: unknown): ClosedDeal | null {
   const obj = asRecord(entry);
   if (!obj) return null;
-  const dealId = str(obj['id']);
-  const profit = num(obj['profit']);
+  const dealId = asString(obj['id']);
+  const profit = asNumber(obj['profit']);
   if (dealId === null || profit === null) return null;
   return {
     dealId,
-    asset: str(obj['asset']),
+    asset: asString(obj['asset']),
     profit,
-    amount: num(obj['amount']),
-    closePrice: num(obj['closePrice']),
-    closeTimestamp: num(obj['closeTimestamp'] ?? obj['closeTime']),
+    amount: asNumber(obj['amount']),
+    closePrice: asNumber(obj['closePrice']),
+    closeTimestamp: asNumber(obj['closeTimestamp'] ?? obj['closeTime']),
     raw: entry,
   };
 }
@@ -208,13 +192,13 @@ export function parseAssets(frame: unknown): AssetInfo[] {
   const out: AssetInfo[] = [];
   for (const entry of frame) {
     if (!Array.isArray(entry) || entry.length < 3) continue;
-    const symbol = str(entry[1]);
+    const symbol = asString(entry[1]);
     if (symbol === null) continue;
     const openFlag = entry.find((v, i) => i >= 12 && typeof v === 'boolean');
     out.push({
       symbol,
-      name: str(entry[2]) ?? symbol,
-      payout: num(entry[5]),
+      name: asString(entry[2]) ?? symbol,
+      payout: asNumber(entry[5]),
       isOpen: typeof openFlag === 'boolean' ? openFlag : true,
     });
   }

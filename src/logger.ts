@@ -1,3 +1,5 @@
+import { errorMessage } from './util/errors.ts';
+
 const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'silent'] as const;
 
 export type LogLevel = (typeof LEVELS)[number];
@@ -26,11 +28,8 @@ function envLevel(): LogLevel {
   return (LEVELS as readonly string[]).includes(raw) ? (raw as LogLevel) : 'info';
 }
 
-let currentLevel: LogLevel = envLevel();
-
-export function setLogLevel(level: LogLevel): void {
-  currentLevel = level;
-}
+/** Set once from LOG_LEVEL at startup; there is nothing to change it at runtime. */
+const currentLevel: LogLevel = envLevel();
 
 function enabled(level: Exclude<LogLevel, 'silent'>): boolean {
   return LEVELS.indexOf(level) >= LEVELS.indexOf(currentLevel);
@@ -54,8 +53,7 @@ function render(extra: unknown): string {
     const truncated = text.length > 600 ? `${text.slice(0, 600)}…` : text;
     return ` ${COLORS.gray}${truncated}${COLORS.reset}`;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return ` ${COLORS.gray}[unserializable: ${reason}]${COLORS.reset}`;
+    return ` ${COLORS.gray}[unserializable: ${errorMessage(error)}]${COLORS.reset}`;
   }
 }
 

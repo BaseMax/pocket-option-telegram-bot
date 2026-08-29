@@ -8,7 +8,7 @@ export { normalizeSymbol };
 export type ParseResult = { ok: true; order: OrderSpec } | { ok: false; error: string };
 
 /** Lower-cases and unifies the Persian letter shapes so an alias matches however it was typed. */
-export function normalizeWord(raw: string): string {
+function normalizeWord(raw: string): string {
   return raw
     .trim()
     .toLowerCase()
@@ -90,11 +90,11 @@ const ACCOUNT_ALIASES: Record<string, AccountMode> = {
   واقعی: 'real',
 };
 
-/** Shared readers for the choice words, so /set, /mode and /order all accept the same spellings. */
-export function parseDirection(raw: string): Direction | undefined {
+function parseDirection(raw: string): Direction | undefined {
   return DIRECTION_ALIASES[normalizeWord(raw)];
 }
 
+/** Shared readers for the choice words, so /set, /mode and /order all accept the same spellings. */
 export function parseTriggerMode(raw: string): TriggerMode | undefined {
   return TRIGGER_ALIASES[normalizeWord(raw)];
 }

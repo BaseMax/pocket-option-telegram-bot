@@ -24,15 +24,6 @@ export type OrderStatus =
 
 export const ACTIVE_STATUSES: readonly OrderStatus[] = ['pending', 'armed', 'placing', 'open'];
 
-export const TERMINAL_STATUSES: readonly OrderStatus[] = [
-  'won',
-  'lost',
-  'draw',
-  'cancelled',
-  'failed',
-  'expired',
-];
-
 /**
  * What the user asked for, before the engine turns it into a stored Order.
  * The one-line command, the wizard panel and the order submitter all speak this shape.

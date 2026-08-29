@@ -206,9 +206,6 @@ export function formatTime(unixSeconds: number, timeZone: string): string {
   return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')}`;
 }
 
-export function formatClock(unixSeconds: number, timeZone: string): string {
-  return formatTime(unixSeconds, timeZone).slice(11);
-}
 
 export function nowSeconds(): number {
   return Date.now() / 1000;

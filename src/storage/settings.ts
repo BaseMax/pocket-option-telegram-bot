@@ -1,5 +1,6 @@
 import type { Database, Statement } from 'bun:sqlite';
 import { createLogger } from '../logger.ts';
+import { isPlainObject } from '../util/values.ts';
 import type { AppConfig } from '../config.ts';
 import type { AccountMode, ChartType, ExpiryMode, TriggerMode } from '../types.ts';
 
@@ -58,18 +59,9 @@ export class SettingsStore {
       try {
         const value: unknown = JSON.parse(row.value);
         const current = merged[row.key as keyof BotSettings];
-        if (
-          typeof current === 'object' &&
-          current !== null &&
-          !Array.isArray(current) &&
-          typeof value === 'object' &&
-          value !== null &&
-          !Array.isArray(value)
-        ) {
-          Object.assign(current as object, value);
-        } else {
-          (merged as unknown as Record<string, unknown>)[row.key] = value;
-        }
+        // Nested defaults (ssid, uid) keep the keys the stored value does not mention.
+        if (isPlainObject(current) && isPlainObject(value)) Object.assign(current, value);
+        else (merged as unknown as Record<string, unknown>)[row.key] = value;
       } catch (error) {
         logger.warn(`settings row "${row.key}" is unreadable, using the default`, error);
       }

@@ -24,13 +24,3 @@ export function isTouched(
   return previousPrice !== null && crossed(previousPrice, price, triggerPrice);
 }
 
-export function describeWaiting(order: Pick<Order, 'triggerPrice' | 'approachSide'>): string {
-  switch (order.approachSide) {
-    case 'below':
-      return `price rising to ${order.triggerPrice}`;
-    case 'above':
-      return `price falling to ${order.triggerPrice}`;
-    default:
-      return `price touching ${order.triggerPrice}`;
-  }
-}

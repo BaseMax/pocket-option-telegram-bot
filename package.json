@@ -20,6 +20,7 @@
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "LOG_LEVEL=silent bun test",
+    "check": "bun run typecheck && bun run test"
   }
 }

@@ -25,7 +25,7 @@ export const GUIDE = `
 دکمه‌های پایین را بزنید.
 `.trim();
 
-export const CHART_GUIDE = `
+const CHART_GUIDE = `
 📈 <b>نوع چارت: کندلی، هایکن‌آشی یا خطی؟</b>
 
 این گزینه تعیین می‌کند ربات کندل‌های نماد را چطور بسازد و به شما نشان دهد. قیمت ورود و خروج معامله همیشه قیمت واقعی بازار است و با این گزینه عوض نمی‌شود؛ چیزی که عوض می‌شود شکل کندل‌هاست.
@@ -51,7 +51,7 @@ ${CHART_HELP.line}
 در دستور تک‌خطی: <code>chart=candle</code> · <code>chart=ha</code> · <code>chart=line</code>
 `.trim();
 
-export const TIME_GUIDE = `
+const TIME_GUIDE = `
 ⏱ <b>نوشتن زمان و مدت</b>
 
 هرجا ربات از شما مدت می‌خواهد (مدت معامله، تایم‌فریم، اعتبار سفارش) می‌توانید آزادانه بنویسید.
@@ -74,7 +74,7 @@ ${TIME_FORMAT_HINT}
 در «اعتبار سفارش»، عدد <code>0</code> یعنی سفارش هیچ‌وقت منقضی نشود.
 `.trim();
 
-export const TRADE_GUIDE = `
+const TRADE_GUIDE = `
 🎯 <b>ورود، انقضا و اعتبار</b>
 
 <b>نحوهٔ ورود</b> — یعنی بعد از رسیدن قیمت به هدف، معامله دقیقاً کِی باز شود.
@@ -191,6 +191,7 @@ export const COMMAND_LIST: readonly { command: string; description: string }[] =
   { command: 'history', description: 'آخرین سفارش‌ها' },
   { command: 'stats', description: 'آمار امروز' },
   { command: 'settings', description: 'تنظیمات' },
+  { command: 'session', description: 'ثبت نشست پاکت آپشن' },
   { command: 'mode', description: 'حساب دمو یا ریل' },
   { command: 'help', description: 'راهنما' },
 ];

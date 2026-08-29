@@ -1,4 +1,5 @@
 import { createLogger } from '../logger.ts';
+import { asNumber, asRecord } from './values.ts';
 import type { AccountMode } from '../types.ts';
 
 const logger = createLogger('ssid');
@@ -13,21 +14,6 @@ export interface AuthPayload {
 
 export class SsidParseError extends Error {}
 
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function cabinetUrl(mode: AccountMode): string {
   return mode === 'demo' ? 'cabinet/demo-quick-high-low' : 'cabinet/quick-high-low';
 }
@@ -39,7 +25,7 @@ function buildLegacy(session: string, uid: number, mode: AccountMode, extras: Re
       session,
       isDemo: mode === 'demo' ? 1 : 0,
       uid,
-      platform: toNumber(extras['platform']) ?? 1,
+      platform: asNumber(extras['platform']) ?? 1,
     },
     initFrame: null,
     session,
@@ -74,7 +60,7 @@ function buildModern(
 function fromObject(raw: Record<string, unknown>, mode: AccountMode, uidFallback: number): AuthPayload {
   const { session, sessionToken, secret, uid, id, ...extras } = raw;
 
-  const resolvedUid = toNumber(uid) ?? toNumber(id) ?? uidFallback;
+  const resolvedUid = asNumber(uid) ?? asNumber(id) ?? uidFallback;
   if (!Number.isFinite(resolvedUid) || resolvedUid === 0) {
     throw new SsidParseError('auth payload has no usable "uid"');
   }

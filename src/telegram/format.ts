@@ -93,7 +93,7 @@ export function assetLine(asset: AssetInfo): string {
   );
 }
 
-export function expiryDescription(order: Order): string {
+function expiryDescription(order: Order): string {
   if (order.expiryMode === 'fixed') return `${formatDuration(order.durationSeconds)} (ثابت)`;
   const count = order.candleCount > 1 ? `${order.candleCount} کندل` : 'پایان کندل جاری';
   return `${count} × ${timeframeLabel(order.timeframeSeconds)} (شناور)`;
