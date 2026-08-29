@@ -1,13 +1,11 @@
 import { Bot, InlineKeyboard, type Context } from 'grammy';
 import { createLogger } from '../logger.ts';
 import { errorMessage } from '../util/errors.ts';
-import { nowSeconds } from '../util/time.ts';
-import { MissingCredentialsError } from '../engine/session.ts';
 import { parseAccountMode } from './parse.ts';
-import { checkLimits } from './limits.ts';
 import { CallbackRouter } from './router.ts';
-import { HTML, openNotice } from './reply.ts';
-import { ACCOUNT_LABEL, assetLine, escapeHtml, renderOrder, withBalance } from './format.ts';
+import { HTML } from './reply.ts';
+import { createSymbolVerifier, type SymbolVerdict } from './symbol-check.ts';
+import { createOrderSubmitter } from './submit.ts';
 import { OrderWizard, draftToSpec } from './wizard/index.ts';
 import type { AppConfig } from '../config.ts';
 import type { SettingsStore } from '../storage/settings.ts';
@@ -22,13 +20,6 @@ export interface BotDeps {
   settings: SettingsStore;
   orders: OrderRepository;
   engine: TradeEngine;
-}
-
-/** What the broker thinks of a symbol the user typed: the name to use, a blocker, or a warning. */
-export interface SymbolVerdict {
-  symbol: string;
-  problem: string | null;
-  note: string | null;
 }
 
 /**
@@ -69,98 +60,11 @@ export function createRuntime(deps: BotDeps): BotRuntime {
     }
   };
 
-  const verifySymbol = async (mode: AccountMode, raw: string): Promise<SymbolVerdict> => {
-    const check = await engine.checkSymbol(mode, raw);
-
-    if (check.state === 'unknown') {
-      const list = check.suggestions.map((asset) => `• ${assetLine(asset)}`).join('\n');
-      return {
-        symbol: check.input,
-        problem:
-          `نماد <code>${escapeHtml(check.input)}</code> در فهرست کارگزار نیست.` +
-          (list
-            ? `\n\nشاید یکی از این‌ها باشد:\n${list}`
-            : '\nبا <code>/symbols &lt;بخشی از نام&gt;</code> جست‌وجو کنید.'),
-        note: null,
-      };
-    }
-
-    if (check.state === 'unverified') {
-      return {
-        symbol: check.symbol,
-        problem: null,
-        note: '⚠️ فهرست نمادها از کارگزار گرفته نشد، بدون بررسی ادامه می‌دهیم.',
-      };
-    }
-
-    const notes: string[] = [];
-    if (check.corrected) notes.push(`✅ نماد اصلاح شد به ${assetLine(check.asset)}`);
-    if (!check.asset.isOpen) {
-      notes.push('🔴 بازار این نماد الان بسته است؛ سفارش تا باز شدن بازار منتظر می‌ماند.');
-      if (check.twin?.isOpen) notes.push(`نسخهٔ باز: ${assetLine(check.twin)}`);
-    }
-    return { symbol: check.symbol, problem: null, note: notes.length > 0 ? notes.join('\n') : null };
-  };
-
   const balanceSuffix = (mode: AccountMode): number | null =>
     settings.get('notifyBalance') ? engine.cachedBalance(mode) : null;
 
-  const submitOrder = async (ctx: Context, spec: OrderSpec): Promise<void> => {
-    const chatId = ctx.chat?.id;
-    if (chatId === undefined) return;
-
-    const problem = checkLimits(spec, config.limits);
-    if (problem) {
-      await ctx.reply(`⚠️ ${problem}`, HTML);
-      return;
-    }
-
-    if (!engine.hasCredentials(spec.accountMode)) {
-      await ctx.reply(
-        `⚠️ برای حساب ${ACCOUNT_LABEL[spec.accountMode]} هنوز نشستی ثبت نشده است.\n` +
-          `با دستور <code>/session ${spec.accountMode} &lt;SSID&gt;</code> آن را ثبت کنید.`,
-        HTML,
-      );
-      return;
-    }
-
-    const notice = await openNotice(ctx, '⏳ در حال بررسی نماد و ثبت سفارش…');
-
-    const verdict = await verifySymbol(spec.accountMode, spec.symbol);
-    if (verdict.problem !== null) {
-      await notice.update(`⚠️ ${verdict.problem}`);
-      return;
-    }
-
-    const { validForSeconds, ...rest } = spec;
-    try {
-      const order = await engine.createOrder({
-        ...rest,
-        chatId,
-        symbol: verdict.symbol,
-        validUntil: validForSeconds === null ? null : nowSeconds() + validForSeconds,
-      });
-
-      const text = withBalance(
-        `✅ <b>سفارش ثبت شد</b>\n\n${renderOrder(order, config.timezone)}\n\n` +
-          (verdict.note === null ? '' : `${verdict.note}\n\n`) +
-          `از این لحظه قیمت لحظه‌ای <b>${escapeHtml(order.symbol)}</b> زنده دنبال می‌شود.`,
-        balanceSuffix(order.accountMode),
-        settings.get('notifyBalance'),
-      );
-      const shown = await notice.update(text, {
-        reply_markup: new InlineKeyboard().text('❌ لغو این سفارش', `c:${order.id}`),
-      });
-      if (!shown) await send(chatId, text);
-    } catch (error) {
-      logger.error('failed to create order', error);
-      const message =
-        error instanceof MissingCredentialsError
-          ? 'نشست پاکت آپشن برای این حساب ثبت نشده است.'
-          : errorMessage(error);
-      await notice.update(`⚠️ ثبت سفارش ناموفق بود: ${escapeHtml(message)}`);
-    }
-  };
+  const verifySymbol = createSymbolVerifier(engine);
+  const submitOrder = createOrderSubmitter({ config, settings, engine, verifySymbol, balanceSuffix, send });
 
   const wizard = new OrderWizard(
     settings,

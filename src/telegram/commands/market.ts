@@ -11,7 +11,11 @@ function rank(a: AssetInfo, b: AssetInfo): number {
   return a.isOpen === b.isOpen ? (b.payout ?? 0) - (a.payout ?? 0) : a.isOpen ? -1 : 1;
 }
 
-function searchAssets(assets: readonly AssetInfo[], query: string): AssetInfo[] {
+/**
+ * The assets /symbols should list: everything matching the query by symbol or name, or every
+ * open market when the query is empty, ranked for reading.
+ */
+export function searchAssets(assets: readonly AssetInfo[], query: string): AssetInfo[] {
   const needle = normalizeSymbol(query).replace(/_OTC$/i, '').replace(/^#/, '');
   const matched =
     needle === ''

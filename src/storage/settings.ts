@@ -27,13 +27,14 @@ interface SettingsRow {
 const logger = createLogger('settings');
 
 export class SettingsStore {
-  private readonly db: Database;
   private readonly defaults: BotSettings;
   private readonly selectAll: Statement<SettingsRow, []>;
   private cache: BotSettings;
 
-  constructor(db: Database, config: AppConfig) {
-    this.db = db;
+  constructor(
+    private readonly db: Database,
+    config: AppConfig,
+  ) {
     this.selectAll = db.query<SettingsRow, []>('SELECT key, value FROM settings');
     this.defaults = {
       defaultAccountMode: 'demo',

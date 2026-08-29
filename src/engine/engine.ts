@@ -1,7 +1,8 @@
 import { createLogger } from '../logger.ts';
 import { errorMessage } from '../util/errors.ts';
 import { awaitEvent } from '../util/async.ts';
-import { SessionManager, MissingCredentialsError, borrowSession, type Session } from './session.ts';
+import { MissingCredentialsError, type Session } from './session.ts';
+import { SessionManager, borrowSession } from './session-manager.ts';
 import { resolveExpiry } from './expiry.ts';
 import { MarketData, type SymbolCheck } from './market.ts';
 import { isTouched, resolveApproachSide } from './trigger.ts';
@@ -37,24 +38,18 @@ interface Attachment {
 const HOUSEKEEPING_INTERVAL_MS = 1_000;
 
 export class TradeEngine {
-  private readonly config: AppConfig;
-  private readonly orders: OrderRepository;
-  private readonly sessions: SessionManager;
   private readonly market: MarketData;
   private readonly logger = createLogger('engine');
   private readonly handlers = new Set<EngineEventHandler>();
   private readonly attachments = new Map<string, Attachment>();
   private timer: ReturnType<typeof setInterval> | null = null;
   constructor(
-    config: AppConfig,
-    orders: OrderRepository,
+    private readonly config: AppConfig,
+    private readonly orders: OrderRepository,
     settings: SettingsStore,
-    sessions: SessionManager = new SessionManager(config, settings),
+    private readonly sessions: SessionManager = new SessionManager(config, settings),
   ) {
-    this.config = config;
-    this.orders = orders;
-    this.sessions = sessions;
-    this.market = new MarketData(sessions, settings);
+    this.market = new MarketData(this.sessions, settings);
   }
   start(): void {
     if (this.timer) return;
@@ -436,6 +431,7 @@ export class TradeEngine {
     );
   }
 
+  /** Once a second, look at every live order and do whatever its state has become due for. */
   private housekeeping(): void {
     const now = nowSeconds();
 
@@ -446,50 +442,37 @@ export class TradeEngine {
         continue;
       }
 
-      switch (order.status) {
-        case 'pending': {
-          if (order.validUntil !== null && now >= order.validUntil) {
-            this.finish(
-              orderId,
-              { status: 'expired', note: 'the trigger price was never reached' },
-              (updated) => ({ type: 'expired', order: updated }),
-            );
-          }
-          break;
-        }
-
-        case 'armed': {
-          const price = attachment.session.price;
-          const offset = attachment.session.client.timeOffset;
-          if (price !== null) {
-            this.maybeEnterOnNewCandle(
-              order,
-              now + offset,
-              price,
-              offset,
-              attachment.session.tickFollowsGap,
-            );
-          }
-          break;
-        }
-
-        case 'open': {
-          if (
-            order.closesAt !== null &&
-            !attachment.settlementWarned &&
-            now > order.closesAt + this.config.engine.orderSettleGraceSeconds
-          ) {
-            attachment.settlementWarned = true;
-            attachment.session.client.refreshBalance();
-            this.logger.warn(`order ${orderId} has not settled ${Math.round(now - order.closesAt)}s after expiry`);
-            this.publish({ type: 'settlement_pending', order });
-          }
-          break;
-        }
-
-        default:
-          break;
-      }
+      if (order.status === 'pending') this.expireIfPastDeadline(order, now);
+      else if (order.status === 'armed') this.enterIfCandleOpened(order, attachment, now);
+      else if (order.status === 'open') this.warnIfSettlementLate(order, attachment, now);
     }
+  }
+
+  /** A pending order whose validity ran out never gets its entry, so it ends here. */
+  private expireIfPastDeadline(order: Order, now: number): void {
+    if (order.validUntil === null || now < order.validUntil) return;
+    this.finish(order.id, { status: 'expired', note: 'the trigger price was never reached' }, (updated) => ({
+      type: 'expired',
+      order: updated,
+    }));
+  }
+
+  /** An armed order enters on the next candle, even in a symbol quiet enough to send no ticks. */
+  private enterIfCandleOpened(order: Order, attachment: Attachment, now: number): void {
+    const price = attachment.session.price;
+    if (price === null) return;
+    const offset = attachment.session.client.timeOffset;
+    this.maybeEnterOnNewCandle(order, now + offset, price, offset, attachment.session.tickFollowsGap);
+  }
+
+  /** An open trade past its close time with no result yet: nudge the broker and say so once. */
+  private warnIfSettlementLate(order: Order, attachment: Attachment, now: number): void {
+    if (attachment.settlementWarned || order.closesAt === null) return;
+    if (now <= order.closesAt + this.config.engine.orderSettleGraceSeconds) return;
+
+    attachment.settlementWarned = true;
+    attachment.session.client.refreshBalance();
+    this.logger.warn(`order ${order.id} has not settled ${Math.round(now - order.closesAt)}s after expiry`);
+    this.publish({ type: 'settlement_pending', order });
   }
 }

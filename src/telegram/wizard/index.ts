@@ -33,6 +33,56 @@ function isPromptField(action: string | undefined): action is PromptField {
   return PROMPT_FIELDS.includes(action as PromptField);
 }
 
+/**
+ * A tap that only rearranges the panel. It mutates the state and may return the toast to show;
+ * the taps that talk to Telegram (the prompts, cancel and submit) are handled in handleCallback.
+ */
+type Tap = (state: DraftState, argument: string | undefined) => string | void;
+
+const TAPS: Record<string, Tap> = {
+  direction: ({ draft }) => {
+    draft.direction = cycle(DIRECTION_CYCLE, draft.direction);
+  },
+  account: ({ draft }) => {
+    draft.accountMode = cycle(ACCOUNT_CYCLE, draft.accountMode);
+  },
+  trigger: ({ draft }) => {
+    draft.triggerMode = cycle(TRIGGER_CYCLE, draft.triggerMode);
+    return TRIGGER_HELP[draft.triggerMode];
+  },
+  expiry: ({ draft }) => {
+    draft.expiryMode = cycle(EXPIRY_CYCLE, draft.expiryMode);
+    return EXPIRY_HELP[draft.expiryMode];
+  },
+  info: (state) => {
+    state.info = !state.info;
+  },
+  refresh: (state) => {
+    state.menu = null;
+  },
+
+  chart: (state, argument) => {
+    if (argument === undefined) {
+      state.menu = 'chart';
+      return 'توضیح هر نوع چارت را زیر پنل بخوانید.';
+    }
+    const chart = CHART_CYCLE.find((value) => value === argument);
+    if (chart) state.draft.chartType = chart;
+    state.menu = null;
+    return chart ? CHART_HELP[chart] : undefined;
+  },
+
+  tf: (state, argument) => {
+    if (argument === undefined) {
+      state.menu = 'tf';
+      return;
+    }
+    const seconds = Number(argument);
+    if (Number.isFinite(seconds) && seconds > 0) state.draft.timeframeSeconds = seconds;
+    state.menu = null;
+  },
+};
+
 interface DraftState extends PanelView {
   messageId: number | null;
   promptMessageId: number | null;
@@ -48,16 +98,13 @@ export type WizardSymbolCheck = (
 
 /** Drives one inline panel per chat: taps change the draft, prompts collect what has to be typed. */
 export class OrderWizard {
-  private readonly settings: SettingsStore;
-  private readonly submit: WizardSubmit;
-  private readonly checkSymbol: WizardSymbolCheck | null;
   private readonly states = new Map<number, DraftState>();
 
-  constructor(settings: SettingsStore, submit: WizardSubmit, checkSymbol?: WizardSymbolCheck) {
-    this.settings = settings;
-    this.submit = submit;
-    this.checkSymbol = checkSymbol ?? null;
-  }
+  constructor(
+    private readonly settings: SettingsStore,
+    private readonly submit: WizardSubmit,
+    private readonly checkSymbol?: WizardSymbolCheck,
+  ) {}
 
   async open(ctx: Context, seed?: Partial<OrderDraft>): Promise<void> {
     const chatId = ctx.chat?.id;
@@ -113,7 +160,6 @@ export class OrderWizard {
     }
 
     const [action, argument] = payload.split(':');
-    const d = state.draft;
 
     // Any tap answers or abandons the question we were waiting on.
     if (state.awaiting !== null) {
@@ -121,88 +167,51 @@ export class OrderWizard {
       await this.dropPrompt(ctx, state);
     }
 
-    if (isPromptField(action)) {
-      state.awaiting = action;
-      state.menu = null;
-      await ctx.answerCallbackQuery({ text: `⌨️ ${PROMPTS[action].toast}` });
+    if (isPromptField(action)) return this.ask(ctx, state, action);
+    if (action === 'cancel') return this.cancel(ctx, state);
+    if (action === 'submit') return this.finish(ctx, state);
+
+    const tap = action === undefined ? undefined : TAPS[action];
+    if (!tap) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    await this.applied(ctx, state, tap(state, argument) ?? undefined);
+  }
+
+  /** Switches the panel into "waiting for a typed value" mode and asks for it. */
+  private async ask(ctx: Context, state: DraftState, field: PromptField): Promise<void> {
+    state.awaiting = field;
+    state.menu = null;
+    await ctx.answerCallbackQuery({ text: `⌨️ ${PROMPTS[field].toast}` });
+    await this.refresh(ctx, state);
+    await this.sendPrompt(ctx, state, field);
+  }
+
+  private async cancel(ctx: Context, state: DraftState): Promise<void> {
+    this.states.delete(state.draft.chatId);
+    await ctx.answerCallbackQuery({ text: 'لغو شد.' });
+    await this.retirePanel(ctx, state, '❌ ساخت سفارش لغو شد.');
+  }
+
+  /** Hands a complete draft to the submitter and leaves the panel frozen behind it. */
+  private async finish(ctx: Context, state: DraftState): Promise<void> {
+    const draft = state.draft;
+    if (draft.symbol === null || draft.triggerPrice === null) {
+      await ctx.answerCallbackQuery({
+        text: 'اول نماد و قیمت ورود را کامل کنید: روی دکمه‌شان بزنید و مقدار را تایپ کنید.',
+        show_alert: true,
+      });
       await this.refresh(ctx, state);
-      await this.sendPrompt(ctx, state, action);
       return;
     }
 
-    switch (action) {
-      case 'direction':
-        d.direction = cycle(DIRECTION_CYCLE, d.direction);
-        break;
-      case 'account':
-        d.accountMode = cycle(ACCOUNT_CYCLE, d.accountMode);
-        break;
-      case 'trigger':
-        d.triggerMode = cycle(TRIGGER_CYCLE, d.triggerMode);
-        return this.applied(ctx, state, TRIGGER_HELP[d.triggerMode]);
-      case 'expiry':
-        d.expiryMode = cycle(EXPIRY_CYCLE, d.expiryMode);
-        return this.applied(ctx, state, EXPIRY_HELP[d.expiryMode]);
-      case 'info':
-        state.info = !state.info;
-        break;
-
-      case 'chart': {
-        if (argument === undefined) {
-          state.menu = 'chart';
-          return this.applied(ctx, state, 'توضیح هر نوع چارت را زیر پنل بخوانید.');
-        }
-        const chart = CHART_CYCLE.find((value) => value === argument);
-        if (chart) d.chartType = chart;
-        state.menu = null;
-        return this.applied(ctx, state, chart ? CHART_HELP[chart] : '');
-      }
-
-      case 'tf': {
-        if (argument === undefined) {
-          state.menu = 'tf';
-          break;
-        }
-        const seconds = Number(argument);
-        if (Number.isFinite(seconds) && seconds > 0) d.timeframeSeconds = seconds;
-        state.menu = null;
-        break;
-      }
-
-      case 'refresh':
-        state.menu = null;
-        break;
-
-      case 'cancel':
-        this.states.delete(chatId);
-        await ctx.answerCallbackQuery({ text: 'لغو شد.' });
-        await this.retirePanel(ctx, state, '❌ ساخت سفارش لغو شد.');
-        return;
-
-      case 'submit': {
-        if (d.symbol === null || d.triggerPrice === null) {
-          await ctx.answerCallbackQuery({
-            text: 'اول نماد و قیمت ورود را کامل کنید: روی دکمه‌شان بزنید و مقدار را تایپ کنید.',
-            show_alert: true,
-          });
-          await this.refresh(ctx, state);
-          return;
-        }
-        this.states.delete(chatId);
-        state.menu = null;
-        state.info = false;
-        await ctx.answerCallbackQuery({ text: 'در حال ثبت…' });
-        await this.freeze(ctx, state, renderPanel(state, true));
-        await this.submit(d, ctx);
-        return;
-      }
-
-      default:
-        await ctx.answerCallbackQuery();
-        return;
-    }
-
-    await this.applied(ctx, state);
+    this.states.delete(draft.chatId);
+    state.menu = null;
+    state.info = false;
+    await ctx.answerCallbackQuery({ text: 'در حال ثبت…' });
+    await this.freeze(ctx, state, renderPanel(state, true));
+    await this.submit(draft, ctx);
   }
 
   async handleText(ctx: Context): Promise<boolean> {

@@ -87,12 +87,10 @@ function toOrder(row: OrderRow): Order {
 }
 
 export class OrderRepository {
-  private readonly db: Database;
   private readonly selectById: Statement<OrderRow, [string]>;
   private readonly selectByDeal: Statement<OrderRow, [string]>;
 
-  constructor(db: Database) {
-    this.db = db;
+  constructor(private readonly db: Database) {
     this.selectById = db.query<OrderRow, [string]>('SELECT * FROM orders WHERE id = ?');
     this.selectByDeal = db.query<OrderRow, [string]>('SELECT * FROM orders WHERE deal_id = ?');
   }

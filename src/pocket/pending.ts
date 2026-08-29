@@ -13,13 +13,11 @@ interface Pending<T> {
  */
 export class PendingRequests<T> {
   private readonly entries = new Map<number, Pending<T>>();
-  private readonly timeoutMs: number;
-  private readonly timeoutMessage: string;
 
-  constructor(timeoutMs: number, timeoutMessage: string) {
-    this.timeoutMs = timeoutMs;
-    this.timeoutMessage = timeoutMessage;
-  }
+  constructor(
+    private readonly timeoutMs: number,
+    private readonly timeoutMessage: string,
+  ) {}
 
   get size(): number {
     return this.entries.size;

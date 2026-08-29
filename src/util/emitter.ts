@@ -9,13 +9,6 @@ export class Emitter<Events extends Record<string, readonly unknown[]>> {
     return () => this.off(event, fn);
   }
 
-  once<K extends keyof Events>(event: K, fn: Listener<Events[K]>): () => void {
-    const off = this.on(event, ((...args: Events[K]) => {
-      off();
-      fn(...args);
-    }) as Listener<Events[K]>);
-    return off;
-  }
 
   off<K extends keyof Events>(event: K, fn: Listener<Events[K]>): void {
     this.listeners[event]?.delete(fn);

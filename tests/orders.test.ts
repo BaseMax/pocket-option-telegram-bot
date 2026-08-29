@@ -1,26 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { openDatabase } from '../src/storage/db.ts';
 import { OrderRepository } from '../src/storage/orders.ts';
-import type { NewOrder } from '../src/types.ts';
+import { newOrder } from './fakes.ts';
 
 function repo(): OrderRepository {
   return new OrderRepository(openDatabase(':memory:'));
 }
 
-const base: NewOrder = {
-  chatId: 111,
-  accountMode: 'demo',
-  symbol: 'GBPAUD_otc',
-  direction: 'call',
-  triggerPrice: 1.9532,
-  triggerMode: 'touch',
-  amount: 1,
-  expiryMode: 'fixed',
-  durationSeconds: 60,
-  candleCount: 1,
-  timeframeSeconds: 60,
-  chartType: 'candle',
-};
+const base = newOrder({ chatId: 111 });
 
 describe('OrderRepository', () => {
   it('creates a pending order with a short unique id', () => {

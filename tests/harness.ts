@@ -5,7 +5,7 @@ import { OrderRepository } from '../src/storage/orders.ts';
 import { SettingsStore } from '../src/storage/settings.ts';
 import { TradeEngine } from '../src/engine/engine.ts';
 import { FakeSessionManager, testConfig } from './fakes.ts';
-import type { SessionManager } from '../src/engine/session.ts';
+import type { SessionManager } from '../src/engine/session-manager.ts';
 import type { Update } from 'grammy/types';
 
 export interface ApiCall {

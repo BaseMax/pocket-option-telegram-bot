@@ -2,6 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import { Emitter } from '../util/emitter.ts';
 import { awaitEvent } from '../util/async.ts';
 import { PendingRequests } from './pending.ts';
+import { ReconnectPolicy } from './reconnect.ts';
 import { createLogger, type Logger } from '../logger.ts';
 import { nowSeconds } from '../util/time.ts';
 import { redactAuth, type AuthPayload } from '../util/ssid.ts';
@@ -27,9 +28,6 @@ import {
 const PING_INTERVAL_MS = 15_000;
 const PLAYER_STATE_INTERVAL_MS = 30_000;
 const AUTH_TIMEOUT_MS = 12_000;
-const RECONNECT_MIN_MS = 1_000;
-const RECONNECT_MAX_MS = 15_000;
-const FAILURES_BEFORE_ROTATE = 3;
 const AUTH_TIMEOUTS_BEFORE_GIVING_UP = 3;
 const OFFSET_QUANTUM_SECONDS = 900;
 
@@ -58,12 +56,10 @@ interface PocketClientEvents extends Record<string, readonly unknown[]> {
 export class PocketOptionClient extends Emitter<PocketClientEvents> {
   readonly mode: AccountMode;
 
-  private readonly options: PocketClientOptions;
   private readonly logger: Logger;
 
   private socket: Socket | null = null;
-  private endpointIndex = 0;
-  private consecutiveFailures = 0;
+  private readonly reconnect: ReconnectPolicy;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private playerStateTimer: ReturnType<typeof setInterval> | null = null;
@@ -85,13 +81,13 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
   private serverTimeOffset: number;
   private balanceValue: number | null = null;
 
-  constructor(options: PocketClientOptions) {
+  constructor(private readonly options: PocketClientOptions) {
     super();
-    this.options = options;
     this.mode = options.mode;
     this.serverTimeOffset = options.serverTimeOffset;
     this.logger = createLogger(`po:${options.label}`);
     this.pendingOpens = new PendingRequests(options.ackTimeoutMs, 'broker did not acknowledge the order in time');
+    this.reconnect = new ReconnectPolicy(options.servers.length);
   }
 
   start(): void {
@@ -121,7 +117,7 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
   }
 
   get endpoint(): ServerEndpoint | undefined {
-    return this.options.servers[this.endpointIndex % this.options.servers.length];
+    return this.options.servers[this.reconnect.endpointIndex];
   }
   get assets(): readonly AssetInfo[] {
     return this.assetList;
@@ -196,7 +192,7 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
     if (this.authenticatedFlag) return;
     this.authenticatedFlag = true;
     this.everAuthenticated = true;
-    this.consecutiveFailures = 0;
+    this.reconnect.reset();
     this.authTimeouts = 0;
     if (this.authTimer) clearTimeout(this.authTimer);
     this.authTimer = null;
@@ -244,15 +240,11 @@ export class PocketOptionClient extends Emitter<PocketClientEvents> {
       return;
     }
 
-    this.consecutiveFailures += 1;
-    if (this.consecutiveFailures % FAILURES_BEFORE_ROTATE === 0 && this.options.servers.length > 1) {
-      this.endpointIndex = (this.endpointIndex + 1) % this.options.servers.length;
-      this.logger.warn(`rotating to endpoint ${this.endpoint?.url}`);
-    }
+    const { delayMs, rotated } = this.reconnect.recordFailure();
+    if (rotated) this.logger.warn(`rotating to endpoint ${this.endpoint?.url}`);
 
-    const delay = Math.min(RECONNECT_MIN_MS * 2 ** (this.consecutiveFailures - 1), RECONNECT_MAX_MS);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => this.openSocket(), delay);
+    this.reconnectTimer = setTimeout(() => this.openSocket(), delayMs);
   }
 
   private clearTimers(): void {

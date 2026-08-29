@@ -1,6 +1,6 @@
 import { Emitter } from '../src/util/emitter.ts';
 import { loadConfig } from '../src/config.ts';
-import type { AccountMode, Tick } from '../src/types.ts';
+import type { AccountMode, NewOrder, Order, Tick } from '../src/types.ts';
 import type { AssetInfo, OpenOrderAck, ClosedDeal } from '../src/pocket/protocol.ts';
 
 export const testConfig = loadConfig({
@@ -8,6 +8,50 @@ export const testConfig = loadConfig({
   DB_PATH: ':memory:',
   MIN_DURATION_SECONDS: '5',
 } as NodeJS.ProcessEnv);
+
+/** The order every test starts from; pass a patch for whatever the test is actually about. */
+export function newOrder(patch: Partial<NewOrder> = {}): NewOrder {
+  return {
+    chatId: 1,
+    accountMode: 'demo',
+    symbol: 'GBPAUD_otc',
+    direction: 'call',
+    triggerPrice: 1.9532,
+    triggerMode: 'touch',
+    amount: 1,
+    expiryMode: 'fixed',
+    durationSeconds: 60,
+    candleCount: 1,
+    timeframeSeconds: 60,
+    chartType: 'candle',
+    ...patch,
+  };
+}
+
+/** A stored order, for the pure functions that read one without a database behind them. */
+export function storedOrder(patch: Partial<Order> = {}): Order {
+  return {
+    ...newOrder(),
+    id: 'A7K2',
+    approachSide: 'below',
+    status: 'pending',
+    referencePrice: null,
+    validUntil: null,
+    triggeredPrice: null,
+    triggeredAt: null,
+    dealId: null,
+    openPrice: null,
+    openedAt: null,
+    closesAt: null,
+    closePrice: null,
+    closedAt: null,
+    profit: null,
+    note: null,
+    createdAt: 0,
+    updatedAt: 0,
+    ...patch,
+  };
+}
 
 export interface OpenCall {
   asset: string;

@@ -56,14 +56,10 @@ export interface TickResult {
 }
 
 export class CandleSeries {
-  readonly timeframeSeconds: number;
-
   private readonly candles: Candle[] = [];
   private live: Candle | null = null;
 
-  constructor(timeframeSeconds: number) {
-    this.timeframeSeconds = timeframeSeconds;
-  }
+  constructor(readonly timeframeSeconds: number) {}
   addTick(tick: Tick): TickResult {
     const openTime = candleOpenTime(tick.time, this.timeframeSeconds);
     const live = this.live;

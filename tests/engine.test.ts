@@ -3,9 +3,8 @@ import { openDatabase } from '../src/storage/db.ts';
 import { OrderRepository } from '../src/storage/orders.ts';
 import { SettingsStore } from '../src/storage/settings.ts';
 import { TradeEngine, type EngineEvent } from '../src/engine/engine.ts';
-import { FakeSession, FakeSessionManager, flush, testConfig as config } from './fakes.ts';
-import type { SessionManager } from '../src/engine/session.ts';
-import type { NewOrder } from '../src/types.ts';
+import { FakeSession, FakeSessionManager, flush, newOrder, testConfig as config } from './fakes.ts';
+import type { SessionManager } from '../src/engine/session-manager.ts';
 
 function harness() {
   const db = openDatabase(':memory:');
@@ -18,21 +17,7 @@ function harness() {
   return { engine, orders, events, fakeSessions };
 }
 
-const base: NewOrder = {
-  chatId: 1,
-  accountMode: 'demo',
-  symbol: 'GBPAUD_otc',
-  direction: 'call',
-  triggerPrice: 1.95,
-  triggerMode: 'touch',
-  amount: 2,
-  expiryMode: 'fixed',
-  durationSeconds: 60,
-  candleCount: 1,
-  timeframeSeconds: 60,
-  chartType: 'candle',
-  referencePrice: 1.9,
-};
+const base = newOrder({ triggerPrice: 1.95, amount: 2, referencePrice: 1.9 });
 
 describe('TradeEngine', () => {
   it('waits below the trigger, then enters on the touch', async () => {

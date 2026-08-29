@@ -191,13 +191,15 @@ src/
     servers.ts          demo/real endpoint lists with failover
     protocol.ts         socket.io event names and defensive frame parsers
     client.ts           one authenticated connection: auth, keepalive, orders
+    reconnect.ts        backoff and endpoint failover policy
     pending.ts          requests waiting for a broker acknowledgement
     candles.ts          tick -> candle aggregation (candle / heikin-ashi / line)
     symbols.ts          symbol spelling and matching against the asset list
   engine/
     trigger.ts          pure crossing detection
     expiry.ts           when a trade closes: fixed seconds or a candle boundary
-    session.ts          one session per (account, symbol) + reference counting
+    session.ts          one broker connection, its ticks and its candle series
+    session-manager.ts  one session per (account, symbol), reference counted
     market.ts           balance, asset list, live price
     engine.ts           the order state machine
   storage/
@@ -212,6 +214,8 @@ src/
     texts.ts            the /start guide and its topic pages
     notify.ts           engine events -> chat messages
     limits.ts           order guard rails
+    submit.ts           the one path an order takes to reach the engine
+    symbol-check.ts     the broker's verdict on a symbol, in Persian
     parse.ts            one-line /order syntax
     format.ts           all Persian user-facing copy
     commands/

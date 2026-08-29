@@ -2,8 +2,8 @@ import { createLogger } from '../logger.ts';
 import { errorMessage } from '../util/errors.ts';
 import { awaitEvent } from '../util/async.ts';
 import { normalizeSymbol, resolveSymbol } from '../pocket/symbols.ts';
-import { borrowSession } from './session.ts';
-import type { SessionManager, Session } from './session.ts';
+import { borrowSession, type SessionManager } from './session-manager.ts';
+import type { Session } from './session.ts';
 import type { SettingsStore } from '../storage/settings.ts';
 import type { AccountMode } from '../types.ts';
 import type { AssetInfo } from '../pocket/protocol.ts';
@@ -26,14 +26,12 @@ const TICK_TIMEOUT_MS = 10_000;
  * name and always gives it back; the session manager closes it once it goes idle.
  */
 export class MarketData {
-  private readonly sessions: SessionManager;
-  private readonly settings: SettingsStore;
   private readonly logger = createLogger('market');
 
-  constructor(sessions: SessionManager, settings: SettingsStore) {
-    this.sessions = sessions;
-    this.settings = settings;
-  }
+  constructor(
+    private readonly sessions: SessionManager,
+    private readonly settings: SettingsStore,
+  ) {}
 
   /** The first live session for this account that already knows the answer, if there is one. */
   private fromLiveSession<T>(mode: AccountMode, read: (session: Session) => T | null): T | null {
